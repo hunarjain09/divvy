@@ -1,78 +1,83 @@
 /**
  * @jest-environment node
  */
-const puppeteer = require('puppeteer');
+const fs = require('fs');
 const path = require('path');
 
 describe('PWA Configuration', () => {
-  let browser, page;
+  let htmlContent;
 
-  beforeAll(async () => {
-    browser = await puppeteer.launch({ headless: 'new' });
-    page = await browser.newPage();
+  beforeAll(() => {
     const filePath = path.join(process.cwd(), 'divvy.html');
-    await page.goto(`file://${filePath}`, { waitUntil: 'networkidle0' });
-  }, 30000);
-
-  afterAll(async () => {
-    if (browser) {
-      await browser.close();
-    }
+    htmlContent = fs.readFileSync(filePath, 'utf8');
   });
 
-  test('has manifest link', async () => {
-    const manifest = await page.$('link[rel="manifest"]');
-    expect(manifest).not.toBeNull();
-
-    const href = await page.$eval('link[rel="manifest"]', el => el.getAttribute('href'));
-    expect(href).toBe('manifest.json');
+  test('has manifest link', () => {
+    expect(htmlContent).toMatch(/<link\s+rel="manifest"\s+href="manifest\.json">/);
   });
 
-  test('has apple-touch-icon', async () => {
-    const icon = await page.$('link[rel="apple-touch-icon"]');
-    expect(icon).not.toBeNull();
-
-    const href = await page.$eval('link[rel="apple-touch-icon"]', el => el.getAttribute('href'));
-    expect(href).toContain('icon-180x180.png');
+  test('has apple-touch-icon', () => {
+    expect(htmlContent).toMatch(/<link\s+rel="apple-touch-icon"[^>]*href="icons\/icon-180x180\.png"/);
   });
 
-  test('has theme-color meta tag', async () => {
-    const theme = await page.$('meta[name="theme-color"]');
-    expect(theme).not.toBeNull();
-
-    const content = await page.$eval('meta[name="theme-color"]', el => el.getAttribute('content'));
-    expect(content).toBe('#30e87a');
+  test('has theme-color meta tag', () => {
+    expect(htmlContent).toMatch(/<meta\s+name="theme-color"\s+content="#30e87a">/);
   });
 
-  test('has favicon links', async () => {
-    const pngFavicon = await page.$('link[rel="icon"][type="image/png"]');
-    expect(pngFavicon).not.toBeNull();
-
-    const svgFavicon = await page.$('link[rel="icon"][type="image/svg+xml"]');
-    expect(svgFavicon).not.toBeNull();
+  test('has favicon links', () => {
+    // PNG favicon
+    expect(htmlContent).toMatch(/<link\s+rel="icon"\s+type="image\/png"[^>]*href="icons\/icon-32x32\.png"/);
+    // SVG favicon
+    expect(htmlContent).toMatch(/<link\s+rel="icon"\s+type="image\/svg\+xml"\s+href="icons\/divvy-icon\.svg">/);
   });
 
-  test('has iOS meta tags', async () => {
-    const webAppCapable = await page.$('meta[name="apple-mobile-web-app-capable"]');
-    expect(webAppCapable).not.toBeNull();
-
-    const statusBarStyle = await page.$('meta[name="apple-mobile-web-app-status-bar-style"]');
-    expect(statusBarStyle).not.toBeNull();
-
-    const webAppTitle = await page.$('meta[name="apple-mobile-web-app-title"]');
-    expect(webAppTitle).not.toBeNull();
+  test('has iOS meta tags', () => {
+    expect(htmlContent).toMatch(/<meta\s+name="apple-mobile-web-app-capable"\s+content="yes">/);
+    expect(htmlContent).toMatch(/<meta\s+name="apple-mobile-web-app-status-bar-style"\s+content="default">/);
+    expect(htmlContent).toMatch(/<meta\s+name="apple-mobile-web-app-title"\s+content="Divvy">/);
   });
 
-  test('has service worker registration script', async () => {
-    const swScript = await page.evaluate(() => {
-      const scripts = document.querySelectorAll('script');
-      for (const script of scripts) {
-        if (script.textContent && script.textContent.includes('serviceWorker')) {
-          return true;
-        }
-      }
-      return false;
-    });
-    expect(swScript).toBe(true);
+  test('has service worker registration script', () => {
+    expect(htmlContent).toMatch(/navigator\.serviceWorker\.register\(['"]sw\.js['"]\)/);
+  });
+
+  test('manifest.json exists and is valid', () => {
+    const manifestPath = path.join(process.cwd(), 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+    expect(manifest.name).toBe('Divvy');
+    expect(manifest.short_name).toBe('Divvy');
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.theme_color).toBe('#30e87a');
+    expect(manifest.icons).toBeInstanceOf(Array);
+    expect(manifest.icons.length).toBeGreaterThan(0);
+
+    // Check for required icon sizes
+    const sizes = manifest.icons.map(i => i.sizes);
+    expect(sizes).toContain('192x192');
+    expect(sizes).toContain('512x512');
+  });
+
+  test('service worker file exists and has required handlers', () => {
+    const swPath = path.join(process.cwd(), 'sw.js');
+    expect(fs.existsSync(swPath)).toBe(true);
+
+    const swContent = fs.readFileSync(swPath, 'utf8');
+    // Check for service worker event listeners
+    expect(swContent).toContain("addEventListener('install'");
+    expect(swContent).toContain("addEventListener('activate'");
+    expect(swContent).toContain("addEventListener('fetch'");
+    expect(swContent).toContain('caches');
+  });
+
+  test('icon files exist', () => {
+    const iconDir = path.join(process.cwd(), 'icons');
+    expect(fs.existsSync(iconDir)).toBe(true);
+
+    // Check critical icons exist
+    expect(fs.existsSync(path.join(iconDir, 'icon-180x180.png'))).toBe(true);
+    expect(fs.existsSync(path.join(iconDir, 'icon-192x192.png'))).toBe(true);
+    expect(fs.existsSync(path.join(iconDir, 'icon-512x512.png'))).toBe(true);
+    expect(fs.existsSync(path.join(iconDir, 'divvy-icon.svg'))).toBe(true);
   });
 });
