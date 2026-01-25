@@ -60,6 +60,14 @@ jobs:
             --file-ext html
           mv dist/divvy.html dist/index.html
 
+      - name: Copy PWA assets
+        run: |
+          mkdir -p dist/icons
+          cp icons/*.png dist/icons/
+          cp icons/*.svg dist/icons/
+          cp manifest.json dist/
+          cp sw.js dist/
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 

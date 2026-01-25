@@ -1,0 +1,103 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Define gradients for depth -->
+  <defs>
+    <linearGradient id="billGradient1" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#81C784;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#66BB6A;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="billGradient2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#66BB6A;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#43A047;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="billGradient3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#43A047;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2E7D32;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="lightningGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFD54F;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FFC107;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Bottom bill (darkest) -->
+  <g>
+    <path d="M 110 270 L 110 380 C 110 390 115 395 125 395 L 387 395 C 397 395 402 390 402 380 L 402 270 C 402 260 397 255 387 255 L 125 255 C 115 255 110 260 110 270 Z" 
+          fill="url(#billGradient3)"/>
+    <!-- Bill edge details -->
+    <path d="M 125 255 L 130 255 Q 133 258 133 262 L 133 388 Q 133 392 130 395 L 125 395" 
+          fill="#1B5E20" opacity="0.3"/>
+    <path d="M 387 255 L 382 255 Q 379 258 379 262 L 379 388 Q 379 392 382 395 L 387 395" 
+          fill="#1B5E20" opacity="0.3"/>
+  </g>
+  
+  <!-- Middle bill -->
+  <g>
+    <path d="M 110 240 L 110 350 C 110 360 115 365 125 365 L 387 365 C 397 365 402 360 402 350 L 402 240 C 402 230 397 225 387 225 L 125 225 C 115 225 110 230 110 240 Z" 
+          fill="url(#billGradient2)"/>
+    <!-- Inner border decoration -->
+    <rect x="120" y="235" width="272" height="120" rx="8" fill="none" stroke="#81C784" stroke-width="2" opacity="0.5"/>
+    <!-- Corner details -->
+    <circle cx="135" cy="250" r="4" fill="#81C784" opacity="0.6"/>
+    <circle cx="377" cy="250" r="4" fill="#81C784" opacity="0.6"/>
+    <circle cx="135" cy="340" r="4" fill="#81C784" opacity="0.6"/>
+    <circle cx="377" cy="340" r="4" fill="#81C784" opacity="0.6"/>
+  </g>
+  
+  <!-- Top bill (main visible) -->
+  <g>
+    <!-- Main bill shape with rounded corners -->
+    <path d="M 110 210 L 110 320 C 110 330 115 335 125 335 L 387 335 C 397 335 402 330 402 320 L 402 210 C 402 200 397 195 387 195 L 125 195 C 115 195 110 200 110 210 Z" 
+          fill="url(#billGradient1)"/>
+    
+    <!-- Inner decorative border -->
+    <rect x="120" y="205" width="272" height="120" rx="10" fill="none" stroke="#A5D6A7" stroke-width="2.5" opacity="0.7"/>
+    
+    <!-- Decorative corner flourishes -->
+    <path d="M 130 215 Q 128 212 125 212" stroke="#A5D6A7" stroke-width="2" fill="none" opacity="0.8"/>
+    <path d="M 382 215 Q 384 212 387 212" stroke="#A5D6A7" stroke-width="2" fill="none" opacity="0.8"/>
+    <path d="M 130 315 Q 128 318 125 318" stroke="#A5D6A7" stroke-width="2" fill="none" opacity="0.8"/>
+    <path d="M 382 315 Q 384 318 387 318" stroke="#A5D6A7" stroke-width="2" fill="none" opacity="0.8"/>
+    
+    <!-- Small decorative circles in corners -->
+    <circle cx="135" cy="220" r="5" fill="#81C784" opacity="0.7"/>
+    <circle cx="377" cy="220" r="5" fill="#81C784" opacity="0.7"/>
+    <circle cx="135" cy="310" r="5" fill="#81C784" opacity="0.7"/>
+    <circle cx="377" cy="310" r="5" fill="#81C784" opacity="0.7"/>
+    
+    <!-- Dollar sign background circle -->
+    <circle cx="190" cy="265" r="38" fill="#2E7D32"/>
+    <circle cx="190" cy="265" r="35" fill="#1B5E20" opacity="0.3"/>
+    
+    <!-- Dollar sign ($) -->
+    <text x="190" y="290" font-family="Arial, Helvetica, sans-serif" font-size="62" font-weight="bold" 
+          fill="white" text-anchor="middle" style="text-shadow: 0 2px 4px rgba(0,0,0,0.3);">$</text>
+  </g>
+  
+  <!-- Lightning bolt - white outline (glow effect) -->
+  <g filter="url(#glow)">
+    <defs>
+      <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+        <feMerge>
+          <feMergeNode in="coloredBlur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+    
+    <!-- Outer white outline -->
+    <path d="M 280 130 L 215 295 L 268 295 L 235 430 L 370 255 L 305 255 L 345 130 Z" 
+          fill="white" stroke="white" stroke-width="8" stroke-linejoin="round"/>
+    
+    <!-- Inner yellow lightning with gradient -->
+    <path d="M 285 145 L 230 295 L 273 295 L 245 415 L 355 260 L 310 260 L 340 145 Z" 
+          fill="url(#lightningGradient)" stroke="#FFB300" stroke-width="2"/>
+    
+    <!-- Highlight on lightning -->
+    <path d="M 295 155 L 240 285 L 270 285 L 250 390" 
+          stroke="#FFF59D" stroke-width="3" fill="none" opacity="0.6" stroke-linecap="round"/>
+  </g>
+  
+  <!-- Shadow effect under lightning -->
+  <ellipse cx="280" cy="430" rx="60" ry="15" fill="black" opacity="0.15"/>
+</svg>

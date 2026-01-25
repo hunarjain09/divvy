@@ -1,12 +1,15 @@
 import { jest } from '@jest/globals';
 
-// Mock window.solver (LP Solver)
-global.window.solver = {
-  Solve: jest.fn((model) => ({
-    T_Alice_Bob: 5000, // $50
-    T_Bob_Charlie: 3000, // $30
-  })),
-};
+// Only set up browser mocks if we're in jsdom environment (not node)
+if (typeof window !== 'undefined') {
+  // Mock window.solver (LP Solver)
+  global.window.solver = {
+    Solve: jest.fn((model) => ({
+      T_Alice_Bob: 5000, // $50
+      T_Bob_Charlie: 3000, // $30
+    })),
+  };
+}
 
 // Mock localStorage
 const localStorageMock = {
