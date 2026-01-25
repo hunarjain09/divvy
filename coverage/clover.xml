@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1769323896295" clover="3.2.0">
-  <project timestamp="1769323896295" name="All files">
+<coverage generated="1769326602978" clover="3.2.0">
+  <project timestamp="1769326602978" name="All files">
     <metrics statements="121" coveredstatements="110" conditionals="67" coveredconditionals="62" methods="26" coveredmethods="25" elements="214" coveredelements="197" complexity="0" loc="121" ncloc="121" packages="1" files="4" classes="4"/>
     <file name="balance.js" path="/Users/hunarjain09/Desktop/splitter/src/logic/balance.js">
       <metrics statements="12" coveredstatements="12" conditionals="10" coveredconditionals="9" methods="6" coveredmethods="6"/>

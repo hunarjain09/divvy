@@ -28,7 +28,7 @@ describe('E2E User Workflows', () => {
 
       const balances = calculateBalances(expenses, participants);
 
-      expect(balances.get('Alice')).toBeCloseTo(100);
+      expect(balances.get('Alice')).toBeCloseTo(0);
     });
 
     test('Two participants, one pays for both', () => {

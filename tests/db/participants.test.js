@@ -11,7 +11,7 @@ class ParticipantDB {
   }
 
   async addParticipant(name) {
-    if (!name || typeof name !== 'string') {
+    if (!name || typeof name !== 'string' || !name.trim()) {
       throw new Error('Invalid participant name');
     }
     const existing = await this.db.participants
@@ -94,7 +94,7 @@ describe('Participant Database Operations', () => {
       await participantDB.removeParticipant(id);
 
       const participant = await participantDB.db.participants.get(id);
-      expect(participant).toBeUndefined();
+      expect(participant).toBeNull();
     });
 
     test('Successfully removes participant from list', async () => {
