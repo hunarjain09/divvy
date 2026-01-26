@@ -30,8 +30,14 @@ async function build() {
   console.log('3️⃣  Compiling JSX with Babel...');
   const compiled = transform(reactCode, {
     presets: [
-      ['@babel/preset-env', { targets: 'defaults' }],
-      ['@babel/preset-react', { runtime: 'automatic', importSource: 'react' }]
+      ['@babel/preset-env', {
+        targets: 'defaults',
+        modules: false  // Preserve ES modules (don't convert to CommonJS)
+      }],
+      ['@babel/preset-react', {
+        runtime: 'automatic',
+        importSource: 'react'
+      }]
     ],
     filename: 'app.js'
   });
