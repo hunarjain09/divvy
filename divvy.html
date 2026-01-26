@@ -98,8 +98,8 @@
         }
     </style>
 </head>
-<body class="bg-background-light dark:bg-background-dark text-[#111814] dark:text-white min-h-screen flex flex-col font-display lg:overflow-hidden overflow-y-auto">
-    <div id="root" class="lg:h-full h-auto flex flex-col flex-1 lg:overflow-hidden overflow-visible"></div>
+<body class="bg-background-light dark:bg-background-dark text-[#111814] dark:text-white min-h-screen flex flex-col font-display overflow-y-auto">
+    <div id="root" class="h-auto flex flex-col flex-1 overflow-visible"></div>
 
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -826,11 +826,11 @@
                         </div>
                     </header>
 
-                    <main className="flex-1 lg:overflow-hidden overflow-visible">
-                        <div className="lg:h-full h-auto w-full max-w-[1600px] mx-auto px-3 py-4 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 lg:overflow-y-auto overflow-visible">
+                    <main className="flex-1 overflow-visible">
+                        <div className="h-auto w-full max-w-[1600px] mx-auto px-3 py-4 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 overflow-visible">
                             
                             {/* --- Left Column (4) --- */}
-                            <div className="lg:col-span-4 flex flex-col gap-6 lg:h-full h-auto lg:overflow-hidden">
+                            <div className="lg:col-span-4 flex flex-col gap-6 h-auto">
                                 
                                 {/* Participants */}
                                 <div className="bg-white dark:bg-[#1a2e22] rounded-xl p-4 sm:p-5 border border-[#dce5df] dark:border-white/5 shadow-sm flex flex-col gap-3 sm:gap-4 flex-shrink-0">
@@ -1188,7 +1188,7 @@
                             </div>
 
                             {/* --- Right Column (3) --- */}
-                            <div className="lg:col-span-3 flex flex-col gap-6 lg:h-full lg:overflow-hidden">
+                            <div className="lg:col-span-3 flex flex-col gap-6 h-auto">
                                 
                                 {/* Real-time Balances */}
                                 <div className="bg-white dark:bg-[#1a2e22] rounded-xl p-4 sm:p-5 border border-[#dce5df] dark:border-white/5 shadow-sm flex-shrink-0">
