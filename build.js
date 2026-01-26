@@ -42,10 +42,17 @@ async function build() {
     filename: 'app.js'
   });
 
-  // Write compiled JS
-  const compiledJs = compiled.code;
+  // Write compiled JS with production flag enabled
+  let compiledJs = compiled.code;
+
+  // Enable production mode (disables debug logs)
+  compiledJs = compiledJs.replace(
+    /const IS_PRODUCTION = false;?/g,
+    'const IS_PRODUCTION = true;'
+  );
+
   fs.writeFileSync(path.join(DIST_DIR, 'app.js'), compiledJs);
-  console.log('   ✓ Compiled JavaScript written to dist/app.js');
+  console.log('   ✓ Compiled JavaScript written to dist/app.js (production mode enabled)');
 
   // Step 4: Build Tailwind CSS
   console.log('4️⃣  Building Tailwind CSS...');

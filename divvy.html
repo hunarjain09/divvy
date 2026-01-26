@@ -209,6 +209,9 @@
         import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
 
+        // Production flag - set to true in production builds to disable debug logs
+        const IS_PRODUCTION = false;
+
         // --- Advanced Tracing & Logging System ---
         const DivvyTracer = (() => {
             const events = [];
@@ -221,8 +224,8 @@
             const activeSpans = new Map();
             let spanIdCounter = 0;
 
-            const levels = { trace: 0, debug: 1, info: 2, warn: 3, error: 4 };
-            let currentLevel = levels.debug;
+            const levels = { trace: 0, debug: 1, info: 2, warn: 3, error: 4, silent: 999 };
+            let currentLevel = IS_PRODUCTION ? levels.silent : levels.debug;
 
             const getRelativeTime = () => Date.now() - sessionStart;
 
