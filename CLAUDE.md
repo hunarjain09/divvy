@@ -41,8 +41,10 @@ All data is stored locally in IndexedDB (via Dexie.js). No backend server.
 The production build process:
 1. Extracts and compiles JSX with Babel (eliminates in-browser transpilation)
 2. Processes Tailwind CSS properly (eliminates CDN usage)
-3. Minifies HTML, CSS, and JavaScript
-4. Outputs to `dist/` directory with all assets
+3. Copies vendor libraries from node_modules to dist/vendor/ (Dexie, LP solver, Sortable)
+4. Replaces CDN URLs with local vendor paths
+5. Minifies HTML, CSS, and JavaScript
+6. Outputs to `dist/` directory with all assets
 
 ## Tech Stack
 
@@ -59,7 +61,8 @@ The production build process:
 - Pre-compiled JavaScript (Babel with @babel/preset-react)
 - Processed Tailwind CSS (via Tailwind CLI with custom config)
 - Minified HTML/CSS/JS
-- All external libraries (React, Dexie, LP solver, etc.) still loaded via CDN
+- Self-hosted vendor libraries (Dexie, LP solver, Sortable) in dist/vendor/
+- React loaded from esm.sh CDN (others self-hosted to avoid tracking prevention warnings)
 
 ## Architecture
 
@@ -69,6 +72,7 @@ The production build process:
 - `dist/index.html` - Minified HTML shell
 - `dist/app.js` - Pre-compiled React application (~100KB)
 - `dist/styles.css` - Processed Tailwind CSS (~34KB)
+- `dist/vendor/` - Self-hosted libraries (Dexie, LP solver, Sortable) (~160KB total)
 - `dist/icons/`, `dist/images/` - All assets
 - `dist/manifest.json`, `dist/sw.js` - PWA files
 
@@ -179,8 +183,10 @@ GitHub Actions workflow (`.github/workflows/deploy.yml`):
 **Build Improvements:**
 - ✅ Eliminates Tailwind CSS CDN warning
 - ✅ Eliminates Babel in-browser transpilation warning
+- ✅ Eliminates browser tracking prevention warnings (self-hosted vendor libs)
 - ✅ Smaller bundle size with minification
-- ✅ Better performance with pre-compiled code
+- ✅ Better performance with pre-compiled code and local libraries
+- ✅ Full offline support for all core dependencies
 
 **Deployment:**
 - Automatic deployment on push to `main` branch
@@ -203,6 +209,14 @@ divvy/
 ├── images/                 # UI images (logos, etc.)
 ├── tests/                  # Test suite
 ├── dist/                   # Production build output (git-ignored)
+│   ├── index.html
+│   ├── app.js
+│   ├── styles.css
+│   ├── vendor/            # Self-hosted libraries
+│   ├── icons/
+│   ├── images/
+│   ├── manifest.json
+│   └── sw.js
 └── .github/workflows/      # CI/CD configuration
 ```
 
