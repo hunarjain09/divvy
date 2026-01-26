@@ -1,16 +1,19 @@
-const CACHE_NAME = 'divvy-v2';
+const CACHE_NAME = 'divvy-v3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './app.js',
   './styles.css',
   './manifest.json',
+  './vendor/dexie.min.js',
+  './vendor/solver.js',
+  './vendor/Sortable.min.js',
   './icons/icon-192x192.png',
   './icons/icon-512x512.png',
   './icons/divvy-icon.svg',
   './images/made-with-example.png',
   './images/made-with-example.webp'
-  // Note: CDN resources (React, Dexie, LP solver, etc.) are fetched from network
+  // Note: React and other CDN resources are fetched from network
   // and cached dynamically on first use via the fetch event handler
 ];
 

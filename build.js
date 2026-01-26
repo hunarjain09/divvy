@@ -140,8 +140,16 @@ body {
     .replace(/<style>[\s\S]*?<\/style>\s*/g, '')
     // Remove Babel standalone
     .replace(/<script[^>]*src=["']https:\/\/unpkg\.com\/@babel\/standalone[^>]*><\/script>\s*/gi, '')
+    // Remove loglevel (not needed in production with IS_PRODUCTION flag)
+    .replace(/<script[^>]*src=["']https:\/\/cdn\.jsdelivr\.net\/npm\/loglevel[^>]*><\/script>\s*/gi, '')
     // Remove the React script
     .replace(/<script type="text\/babel"[^>]*>[\s\S]*?<\/script>\s*/g, '');
+
+  // Replace CDN URLs with local vendor files
+  productionHtml = productionHtml
+    .replace(/https:\/\/unpkg\.com\/javascript-lp-solver@[^"]+\/prod\/solver\.js/g, 'vendor/solver.js')
+    .replace(/https:\/\/unpkg\.com\/dexie@[^"]+\/dist\/dexie\.js/g, 'vendor/dexie.min.js')
+    .replace(/https:\/\/cdn\.jsdelivr\.net\/npm\/sortablejs@[^"]+\/Sortable\.min\.js/g, 'vendor/Sortable.min.js');
 
   // Fix import map to include react/jsx-runtime
   productionHtml = productionHtml.replace(
@@ -177,8 +185,35 @@ body {
   fs.writeFileSync(path.join(DIST_DIR, 'index.html'), minifiedHtml);
   console.log('   ✓ Production HTML written to dist/index.html');
 
-  // Step 7: Copy assets
-  console.log('7️⃣  Copying assets...');
+  // Step 7: Copy vendor libraries
+  console.log('7️⃣  Copying vendor libraries...');
+  const vendorDir = path.join(DIST_DIR, 'vendor');
+  if (!fs.existsSync(vendorDir)) {
+    fs.mkdirSync(vendorDir, { recursive: true });
+  }
+
+  // Copy Dexie
+  fs.copyFileSync(
+    path.join(__dirname, 'node_modules', 'dexie', 'dist', 'dexie.min.js'),
+    path.join(vendorDir, 'dexie.min.js')
+  );
+
+  // Copy LP Solver
+  fs.copyFileSync(
+    path.join(__dirname, 'node_modules', 'javascript-lp-solver', 'prod', 'solver.js'),
+    path.join(vendorDir, 'solver.js')
+  );
+
+  // Copy Sortable
+  fs.copyFileSync(
+    path.join(__dirname, 'node_modules', 'sortablejs', 'Sortable.min.js'),
+    path.join(vendorDir, 'Sortable.min.js')
+  );
+
+  console.log('   ✓ Copied vendor libraries (Dexie, LP Solver, Sortable)');
+
+  // Step 8: Copy assets
+  console.log('8️⃣  Copying assets...');
 
   // Copy icons
   const iconsDir = path.join(DIST_DIR, 'icons');
