@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development
 
-**No build step required** - This is a zero-build project. Open `divvy.html` directly in a modern browser to run.
+**No build step required for development** - Open `divvy.html` directly in a modern browser to run locally.
 
 ```bash
 # Run local dev server
@@ -19,9 +19,20 @@ npm test
 
 # Run tests with coverage
 npm test -- --coverage
+
+# Build for production (compiles JSX, processes Tailwind CSS)
+npm run build
 ```
 
 All data is stored locally in IndexedDB (via Dexie.js). No backend server.
+
+### Production Build
+
+The production build process:
+1. Extracts and compiles JSX with Babel (eliminates in-browser transpilation)
+2. Processes Tailwind CSS properly (eliminates CDN usage)
+3. Minifies HTML, CSS, and JavaScript
+4. Outputs to `dist/` directory with all assets
 
 ## Tech Stack
 
@@ -87,9 +98,13 @@ tests/
 
 GitHub Actions workflow (`.github/workflows/deploy.yml`):
 1. Runs Jest tests with coverage
-2. Minifies HTML
-3. Copies PWA assets (icons, manifest, service worker)
+2. Builds production bundle (compiles JSX, processes Tailwind CSS, minifies HTML/CSS/JS)
+3. Copies all assets (icons, images, manifest, service worker)
 4. Deploys to GitHub Pages
+
+The production build eliminates:
+- Tailwind CSS CDN warning
+- Babel in-browser transpilation warning
 
 ## Debugging
 

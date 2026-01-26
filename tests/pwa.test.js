@@ -32,7 +32,7 @@ describe('PWA Configuration', () => {
   });
 
   test('has iOS meta tags', () => {
-    expect(htmlContent).toMatch(/<meta\s+name="apple-mobile-web-app-capable"\s+content="yes">/);
+    expect(htmlContent).toMatch(/<meta\s+name="mobile-web-app-capable"\s+content="yes">/);
     expect(htmlContent).toMatch(/<meta\s+name="apple-mobile-web-app-status-bar-style"\s+content="default">/);
     expect(htmlContent).toMatch(/<meta\s+name="apple-mobile-web-app-title"\s+content="Divvy">/);
   });

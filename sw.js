@@ -1,7 +1,7 @@
 const CACHE_NAME = 'divvy-v1';
 const ASSETS_TO_CACHE = [
   './',
-  './index.html',
+  './divvy.html',
   './manifest.json',
   './icons/icon-192x192.png',
   './icons/icon-512x512.png',
@@ -10,6 +10,7 @@ const ASSETS_TO_CACHE = [
   'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap',
   'https://unpkg.com/javascript-lp-solver@0.4.24/prod/solver.js',
   'https://unpkg.com/dexie@3.2.4/dist/dexie.js',
+  'https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js',
   'https://unpkg.com/@babel/standalone/babel.min.js',
   'https://esm.sh/react@18.2.0',
   'https://esm.sh/react-dom@18.2.0/client'

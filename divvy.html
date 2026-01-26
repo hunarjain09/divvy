@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html lang="en" class="light">
+
 <head>
-    <meta charset="utf-8"/>
-    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <title>Divvy - Smart Group Expense Splitting</title>
 
     <!-- iOS Safari Meta Tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Divvy">
 
@@ -25,19 +26,37 @@
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    
-    <!-- Fonts -->
-    <link href="https://fonts.googleapis.com" rel="preconnect"/>
-    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-    
+
+    <!-- Fonts - Preload for faster loading -->
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+
+    <!-- Preload the Inter font CSS -->
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=block"
+        as="style" />
+    <link rel="preload"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block"
+        as="style" />
+
+    <!-- Load fonts with display=block to prevent FOUT -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=block"
+        rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block"
+        rel="stylesheet" />
+
     <!-- LP Solver -->
     <script src="https://unpkg.com/javascript-lp-solver@0.4.24/prod/solver.js"></script>
-    
+
     <!-- Dexie.js (IndexedDB Wrapper) -->
     <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.js"></script>
-    
+
+    <!-- Sortable.js (Drag & Drop) -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+
+    <!-- Loglevel (Lightweight Logging Library) -->
+    <script src="https://cdn.jsdelivr.net/npm/loglevel@1.9.1/dist/loglevel.min.js"></script>
+
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
@@ -69,7 +88,7 @@
                         "display": ["Inter", "sans-serif"],
                         "sans": ["Inter", "sans-serif"]
                     },
-                    borderRadius: {"DEFAULT": "1rem", "lg": "1.5rem", "xl": "2rem", "2xl": "3rem", "full": "9999px"},
+                    borderRadius: { "DEFAULT": "1rem", "lg": "1.5rem", "xl": "2rem", "2xl": "3rem", "full": "9999px" },
                 },
             },
         }
@@ -80,30 +99,323 @@
             -webkit-user-select: none;
             user-select: none;
         }
+
         .material-symbols-outlined.fill {
             font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        input[type=number]::-webkit-inner-spin-button, 
-        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-        
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
         /* Tooltip styles */
         .tooltip-trigger:hover .tooltip-content {
             opacity: 1;
             visibility: visible;
             transform: translate(-50%, -10px);
         }
+
+        /* Sortable drag styles */
+        .sortable-ghost {
+            opacity: 0.4;
+        }
+
+        .sortable-chosen {
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .sortable-drag {
+            opacity: 1 !important;
+            transform: scale(1.02);
+        }
+
+        .drag-handle {
+            cursor: grab;
+            touch-action: none;
+        }
+
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+
+        .section-card {
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        /* Normalize sections after drag - remove column-specific constraints */
+        .sortable-container {
+            min-height: 0;
+        }
+
+        /* Only apply min-height when container has content */
+        .sortable-container:not(:empty) {
+            min-height: 50px;
+        }
+
+        .sortable-container>.section-card {
+            flex-shrink: 0 !important;
+            flex-grow: 0 !important;
+            max-height: none !important;
+            height: auto !important;
+        }
+
+        /* On mobile, stack sections without growing */
+        @media (max-width: 1023px) {
+            .sortable-container {
+                display: flex;
+                flex-direction: column;
+                gap: 1.5rem;
+                height: auto !important;
+                overflow: visible !important;
+            }
+        }
+
+        /* On desktop, allow controlled growth */
+        @media (min-width: 1024px) {
+            .sortable-container {
+                display: flex;
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+        }
     </style>
 </head>
-<body class="bg-background-light dark:bg-background-dark text-[#111814] dark:text-white min-h-screen flex flex-col font-display lg:overflow-hidden overflow-y-auto">
-    <div id="root" class="lg:h-full h-auto flex flex-col flex-1 lg:overflow-hidden overflow-visible"></div>
+
+<body
+    class="bg-background-light dark:bg-background-dark text-[#111814] dark:text-white min-h-screen flex flex-col font-display overflow-y-auto">
+    <div id="root" class="flex flex-col flex-1"></div>
 
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
+
+        // --- Advanced Tracing & Logging System ---
+        const DivvyTracer = (() => {
+            const events = [];
+            const maxEvents = 500;
+            const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const sessionStart = Date.now();
+            let eventCounter = 0;
+
+            // Active spans for tracking nested function calls
+            const activeSpans = new Map();
+            let spanIdCounter = 0;
+
+            const levels = { trace: 0, debug: 1, info: 2, warn: 3, error: 4 };
+            let currentLevel = levels.debug;
+
+            const getRelativeTime = () => Date.now() - sessionStart;
+
+            const createEvent = (level, category, message, data = null, spanId = null) => {
+                const event = {
+                    id: ++eventCounter,
+                    ts: Date.now(),
+                    relativeMs: getRelativeTime(),
+                    level,
+                    category,
+                    message,
+                    data,
+                    spanId,
+                    parentSpanId: spanId ? activeSpans.get(spanId)?.parentId : null
+                };
+
+                events.push(event);
+                if (events.length > maxEvents) events.shift();
+
+                // Console output with colors
+                const colors = {
+                    trace: 'color: #9ca3af',
+                    debug: 'color: #60a5fa',
+                    info: 'color: #34d399',
+                    warn: 'color: #fbbf24',
+                    error: 'color: #f87171'
+                };
+
+                const timeStr = `+${(event.relativeMs / 1000).toFixed(3)}s`;
+                const spanStr = spanId ? `[span:${spanId}]` : '';
+
+                if (levels[level] >= currentLevel) {
+                    console.log(
+                        `%c${timeStr} %c[${level.toUpperCase()}]%c [${category}]${spanStr} ${message}`,
+                        'color: #6b7280; font-weight: bold',
+                        colors[level],
+                        'color: inherit',
+                        data || ''
+                    );
+                }
+
+                return event;
+            };
+
+            // Start a span (for tracking function execution)
+            const startSpan = (name, category = 'function') => {
+                const spanId = `span_${++spanIdCounter}`;
+                const parentSpan = Array.from(activeSpans.values()).pop();
+
+                activeSpans.set(spanId, {
+                    id: spanId,
+                    name,
+                    category,
+                    startTime: Date.now(),
+                    startRelative: getRelativeTime(),
+                    parentId: parentSpan?.id || null
+                });
+
+                createEvent('debug', category, `→ ${name} started`, null, spanId);
+
+                return {
+                    spanId,
+                    end: (result = null) => {
+                        const span = activeSpans.get(spanId);
+                        if (span) {
+                            const duration = Date.now() - span.startTime;
+                            createEvent('debug', category, `← ${name} completed (${duration}ms)`, result, spanId);
+                            activeSpans.delete(spanId);
+                        }
+                    },
+                    error: (err) => {
+                        const span = activeSpans.get(spanId);
+                        if (span) {
+                            const duration = Date.now() - span.startTime;
+                            createEvent('error', category, `✗ ${name} failed (${duration}ms)`, { error: err?.message || err }, spanId);
+                            activeSpans.delete(spanId);
+                        }
+                    },
+                    log: (level, message, data) => {
+                        createEvent(level, category, message, data, spanId);
+                    }
+                };
+            };
+
+            // Track user interactions
+            const trackInteraction = (type, target, data = null) => {
+                createEvent('info', 'interaction', `🖱️ ${type}: ${target}`, data);
+            };
+
+            // Track state changes
+            const trackStateChange = (stateName, oldValue, newValue) => {
+                createEvent('debug', 'state', `📊 ${stateName} changed`, {
+                    from: typeof oldValue === 'object' ? '[object]' : oldValue,
+                    to: typeof newValue === 'object' ? '[object]' : newValue
+                });
+            };
+
+            // Public API
+            return {
+                sessionId,
+
+                // Log levels
+                trace: (cat, msg, data) => createEvent('trace', cat, msg, data),
+                debug: (cat, msg, data) => createEvent('debug', cat, msg, data),
+                info: (cat, msg, data) => createEvent('info', cat, msg, data),
+                warn: (cat, msg, data) => createEvent('warn', cat, msg, data),
+                error: (cat, msg, data) => createEvent('error', cat, msg, data),
+
+                // Span tracking
+                startSpan,
+
+                // Specialized trackers
+                interaction: trackInteraction,
+                stateChange: trackStateChange,
+
+                // Set log level
+                setLevel: (level) => { currentLevel = levels[level] || levels.debug; },
+
+                // Get all events
+                getEvents: () => [...events],
+
+                // Get events as timeline
+                getTimeline: () => events.map(e => ({
+                    time: `+${(e.relativeMs / 1000).toFixed(3)}s`,
+                    level: e.level,
+                    category: e.category,
+                    message: e.message,
+                    data: e.data
+                })),
+
+                // Get function call chain
+                getCallChain: () => {
+                    const spans = events.filter(e => e.message.startsWith('→') || e.message.startsWith('←') || e.message.startsWith('✗'));
+                    return spans.map(e => `${e.message}`).join('\n');
+                },
+
+                // Filter by category
+                filterByCategory: (category) => events.filter(e => e.category === category),
+
+                // Filter by time range (relative ms)
+                filterByTimeRange: (startMs, endMs) => events.filter(e => e.relativeMs >= startMs && e.relativeMs <= endMs),
+
+                // Get interactions only
+                getInteractions: () => events.filter(e => e.category === 'interaction'),
+
+                // Clear events
+                clear: () => { events.length = 0; eventCounter = 0; },
+
+                // Export as JSON
+                exportJSON: () => JSON.stringify({
+                    sessionId,
+                    exportedAt: new Date().toISOString(),
+                    sessionDuration: getRelativeTime(),
+                    totalEvents: events.length,
+                    events
+                }, null, 2),
+
+                // Download logs
+                download: () => {
+                    const blob = new Blob([DivvyTracer.exportJSON()], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `divvy-trace-${sessionId}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                },
+
+                // Pretty print summary
+                summary: () => {
+                    const byCategory = {};
+                    const byLevel = {};
+                    events.forEach(e => {
+                        byCategory[e.category] = (byCategory[e.category] || 0) + 1;
+                        byLevel[e.level] = (byLevel[e.level] || 0) + 1;
+                    });
+                    console.log('%c📊 Divvy Trace Summary', 'font-size: 14px; font-weight: bold; color: #34d399');
+                    console.log(`Session: ${sessionId}`);
+                    console.log(`Duration: ${(getRelativeTime() / 1000).toFixed(2)}s`);
+                    console.log(`Total Events: ${events.length}`);
+                    console.table(byCategory);
+                    console.table(byLevel);
+                }
+            };
+        })();
+
+        // Expose globally for console debugging
+        window.trace = DivvyTracer;
+
+        // Shorthand logger
+        const T = DivvyTracer;
+
+        T.info('app', '🚀 Divvy app initializing...', { sessionId: T.sessionId });
 
         // --- Dexie Database Setup ---
         const db = new Dexie('TripExpenseDB');
@@ -187,6 +499,27 @@
             );
         };
 
+        // --- Section Card Component with Drag Handle ---
+        const SectionCard = ({ id, title, badge, headerRight, className = "", contentClassName = "", children }) => (
+            <div id={id} className={`section-card bg-white dark:bg-[#1a2e22] rounded-xl border border-[#dce5df] dark:border-white/5 shadow-sm flex flex-col ${className}`} data-id={id}>
+                <div className="flex items-center justify-between p-4 sm:p-5 pb-0 gap-2">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div className="drag-handle p-1 -ml-1 rounded hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-grab active:cursor-grabbing">
+                            <Icon name="drag_indicator" className="text-slate-400 dark:text-slate-500 text-[20px]" />
+                        </div>
+                        <h2 className="text-lg font-bold tracking-tight text-text-main dark:text-white truncate">{title}</h2>
+                        {badge !== undefined && (
+                            <span className="bg-slate-100 dark:bg-white/10 text-xs font-bold px-2 py-1 rounded-md text-slate-600 dark:text-slate-300 flex-shrink-0">{badge}</span>
+                        )}
+                    </div>
+                    {headerRight && <div className="flex-shrink-0">{headerRight}</div>}
+                </div>
+                <div className={`p-4 sm:p-5 pt-3 flex-1 ${contentClassName}`}>
+                    {children}
+                </div>
+            </div>
+        );
+
         // --- Main Component ---
         const App = () => {
             // State
@@ -197,7 +530,7 @@
             const [showRelationshipManager, setShowRelationshipManager] = useState(false);
             const [strangerA, setStrangerA] = useState('');
             const [strangerB, setStrangerB] = useState('');
-            
+
             // Log Expense State
             const [viewMode, setViewMode] = useState('log'); // 'log' | 'history'
             const [expenses, setExpenses] = useState([]);
@@ -208,15 +541,593 @@
 
             // Solver
             const [isSolverLoaded, setIsSolverLoaded] = useState(false);
-            
+
             // Benefits Modal
             const [showBenefitsModal, setShowBenefitsModal] = useState(false);
-            
-            // File Input Ref
-            const fileInputRef = useRef(null);
 
             // Reset confirmation modal
             const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+            // File Input Ref
+            const fileInputRef = useRef(null);
+
+            // Sortable container refs
+            const leftColumnRef = useRef(null);
+            const centerColumnRef = useRef(null);
+            const rightColumnRef = useRef(null);
+
+            // Section order state (persisted to localStorage)
+            const [sectionOrder, setSectionOrder] = useState(() => {
+                const saved = localStorage.getItem('divvy_section_order');
+                const defaultOrder = {
+                    left: ['participants', 'restrictions'],
+                    center: ['expenses'],
+                    right: ['balances', 'settlement']
+                };
+                if (saved) {
+                    try {
+                        const parsed = JSON.parse(saved);
+                        T.info('app', 'Restored section order from localStorage', parsed);
+                        return parsed;
+                    } catch (e) {
+                        T.warn('app', 'Failed to parse saved section order', e);
+                        return defaultOrder;
+                    }
+                }
+                return defaultOrder;
+            });
+
+            // Get all section IDs across all columns
+            const getAllSectionIds = () => {
+                const allIds = new Set(['participants', 'restrictions', 'expenses', 'balances', 'settlement']);
+                return allIds;
+            };
+
+            // Ensure all sections are accounted for (in case of missing sections)
+            const normalizedSectionOrder = useMemo(() => {
+                const allIds = getAllSectionIds();
+                const usedIds = new Set([
+                    ...sectionOrder.left,
+                    ...sectionOrder.center,
+                    ...sectionOrder.right
+                ]);
+
+                // Find any missing sections and add them to their default column
+                const defaults = {
+                    participants: 'left',
+                    restrictions: 'left',
+                    expenses: 'center',
+                    balances: 'right',
+                    settlement: 'right'
+                };
+
+                const normalized = {
+                    left: [...sectionOrder.left],
+                    center: [...sectionOrder.center],
+                    right: [...sectionOrder.right]
+                };
+
+                allIds.forEach(id => {
+                    if (!usedIds.has(id)) {
+                        normalized[defaults[id]].push(id);
+                    }
+                });
+
+                return normalized;
+            }, [sectionOrder]);
+
+            // --- Section Components Map ---
+            // Each section is rendered based on its ID
+            const renderSection = (sectionId) => {
+                switch (sectionId) {
+                    case 'participants':
+                        return (
+                            <div key="participants" className="section-card bg-white dark:bg-[#1a2e22] rounded-xl p-4 sm:p-5 border border-[#dce5df] dark:border-white/5 shadow-sm flex flex-col gap-3 sm:gap-4" data-id="participants">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <div className="drag-handle p-1 -ml-1 rounded hover:bg-slate-100 dark:hover:bg-white/10 transition-colors lg:hidden">
+                                            <Icon name="drag_indicator" className="text-slate-400 dark:text-slate-500 text-[20px]" />
+                                        </div>
+                                        <h2 className="text-lg font-bold tracking-tight text-text-main dark:text-white">Participants</h2>
+                                    </div>
+                                    <span className="bg-slate-100 dark:bg-white/10 text-xs font-bold px-2 py-1 rounded-md text-slate-600 dark:text-slate-300">{participants.length}</span>
+                                </div>
+                                <div className="flex flex-col gap-3">
+                                    <div className="relative group">
+                                        <input
+                                            className="w-full bg-[#f6f8f7] dark:bg-black/20 border-none rounded-lg py-3 pl-4 pr-12 text-sm font-medium focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-slate-400 text-text-main dark:text-white"
+                                            placeholder="Add new person..."
+                                            type="text"
+                                            value={newParticipant}
+                                            onChange={e => setNewParticipant(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && addParticipant()}
+                                        />
+                                        <button
+                                            onClick={addParticipant}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 bg-white dark:bg-[#2a4032] rounded-md shadow-sm text-primary hover:text-primary-dark transition-colors"
+                                        >
+                                            <Icon name="add" className="text-[18px]" />
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 max-h-[150px] overflow-y-auto">
+                                        {participants.length === 0 ? (
+                                            <div className="w-full text-center py-4">
+                                                <p className="text-sm text-slate-400 mb-3">No participants yet</p>
+                                                <button
+                                                    onClick={loadDemoData}
+                                                    className="text-xs font-medium text-primary hover:text-primary-dark bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors"
+                                                >
+                                                    Load Demo Trip
+                                                </button>
+                                            </div>
+                                        ) : participants.map(p => {
+                                            const c = getAvatarColor(p);
+                                            return (
+                                                <div key={p} className="flex items-center gap-2 bg-[#f0f4f2] dark:bg-white/5 rounded-full pl-2 pr-3 py-1.5 hover:bg-[#e2e8e5] dark:hover:bg-white/10 transition-colors cursor-pointer group select-none">
+                                                    <div className={`size-6 rounded-full ${c.bg} ${c.text} flex items-center justify-center text-xs font-bold`}>{p.charAt(0)}</div>
+                                                    <span className="text-sm font-medium text-text-main dark:text-white">{p}</span>
+                                                    <button onClick={e => { e.stopPropagation(); removeParticipant(p); }} className="hover:text-red-500 text-slate-400 dark:text-slate-500 flex items-center ml-1">
+                                                        <Icon name="close" className="text-[14px]" />
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+
+                    case 'restrictions':
+                        return (
+                            <div key="restrictions" className="section-card bg-white dark:bg-[#1a2e22] rounded-xl p-4 sm:p-5 border border-[#dce5df] dark:border-white/5 shadow-sm flex flex-col gap-3 sm:gap-4" data-id="restrictions">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <div className="drag-handle p-1 -ml-1 rounded hover:bg-slate-100 dark:hover:bg-white/10 transition-colors lg:hidden">
+                                            <Icon name="drag_indicator" className="text-slate-400 dark:text-slate-500 text-[20px]" />
+                                        </div>
+                                        <h2 className="text-lg font-bold tracking-tight text-text-main dark:text-white">Payment Restrictions</h2>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowRelationshipManager(!showRelationshipManager)}
+                                        className="text-primary hover:text-primary-dark text-xs font-bold uppercase tracking-wide"
+                                    >
+                                        {showRelationshipManager ? 'Done' : 'Manage'}
+                                    </button>
+                                </div>
+
+                                {showRelationshipManager && (
+                                    <div className="bg-slate-50 dark:bg-black/20 p-3 rounded-lg border border-slate-100 dark:border-white/5 flex flex-col gap-3">
+                                        <div className="flex gap-2">
+                                            <select
+                                                className="flex-1 bg-white dark:bg-[#1a2e22] border-none rounded-lg text-sm p-2 shadow-sm focus:ring-1 focus:ring-primary text-text-main dark:text-white"
+                                                value={strangerA}
+                                                onChange={e => setStrangerA(e.target.value)}
+                                            >
+                                                <option value="">Select person...</option>
+                                                {participants.map(p => <option key={p} value={p}>{p}</option>)}
+                                            </select>
+                                            <select
+                                                className="flex-1 bg-white dark:bg-[#1a2e22] border-none rounded-lg text-sm p-2 shadow-sm focus:ring-1 focus:ring-primary text-text-main dark:text-white"
+                                                value={strangerB}
+                                                onChange={e => setStrangerB(e.target.value)}
+                                            >
+                                                <option value="">Select person...</option>
+                                                {participants.filter(p => p !== strangerA).map(p => <option key={p} value={p}>{p}</option>)}
+                                            </select>
+                                        </div>
+                                        <button
+                                            onClick={toggleStranger}
+                                            disabled={!strangerA || !strangerB}
+                                            className="w-full bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-slate-300 font-bold text-xs py-2 rounded-lg hover:bg-slate-300 dark:hover:bg-white/20 disabled:opacity-50 transition-colors"
+                                        >
+                                            Toggle Relationship
+                                        </button>
+                                    </div>
+                                )}
+
+                                <div className="flex flex-col gap-3 mt-2 overflow-y-auto pr-2 flex-1">
+                                    {strangers.size === 0 && !showRelationshipManager && (
+                                        <div className="text-center py-4 opacity-50">
+                                            <Icon name="groups" className="text-3xl text-slate-300 mb-2" />
+                                            <p className="text-xs text-slate-400">Everyone knows everyone.</p>
+                                        </div>
+                                    )}
+                                    {Array.from(strangers).map(pair => {
+                                        const [p1, p2] = pair.split('|');
+                                        const c1 = getAvatarColor(p1);
+                                        const c2 = getAvatarColor(p2);
+                                        const p1Removed = !activeParticipantSet.has(p1);
+                                        const p2Removed = !activeParticipantSet.has(p2);
+                                        const isFrozen = p1Removed || p2Removed;
+                                        return (
+                                            <div key={pair} className={`flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-black/20 border ${isFrozen ? 'border-dashed border-slate-300 dark:border-slate-600 opacity-60' : 'border-slate-100 dark:border-white/5'}`}>
+                                                <div className="flex items-center -space-x-2">
+                                                    <div className={`size-8 rounded-full ${c1.bg} ${c1.text} flex items-center justify-center text-xs font-bold ring-2 ring-white dark:ring-[#1a2e22] ${p1Removed ? 'grayscale' : ''}`}>{p1.charAt(0)}</div>
+                                                    <div className={`size-8 rounded-full ${c2.bg} ${c2.text} flex items-center justify-center text-xs font-bold ring-2 ring-white dark:ring-[#1a2e22] ${p2Removed ? 'grayscale' : ''}`}>{p2.charAt(0)}</div>
+                                                </div>
+                                                <div className="flex flex-col items-end">
+                                                    {isFrozen ? (
+                                                        <span className="text-xs font-bold text-slate-500 bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full mb-1">Frozen</span>
+                                                    ) : (
+                                                        <span className="text-xs font-bold text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded-full mb-1">Strangers</span>
+                                                    )}
+                                                    <span className="text-[10px] text-slate-400">{p1} & {p2}</span>
+                                                </div>
+                                                {showRelationshipManager && !isFrozen && (
+                                                    <button onClick={() => removeStrangerPair(pair)} className="ml-2 text-slate-400 hover:text-red-500">
+                                                        <Icon name="delete" className="text-[18px]" />
+                                                    </button>
+                                                )}
+                                                {showRelationshipManager && isFrozen && (
+                                                    <Tooltip text="Can't edit - participant left">
+                                                        <Icon name="lock" className="ml-2 text-[16px] text-slate-400" />
+                                                    </Tooltip>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        );
+
+                    case 'expenses':
+                        return (
+                            <div key="expenses" className="section-card bg-white dark:bg-[#1a2e22] rounded-xl border border-[#dce5df] dark:border-white/5 shadow-lg h-full flex flex-col" data-id="expenses">
+                                <div className="p-4 sm:p-6 border-b border-[#dce5df] dark:border-white/5 flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <div className="drag-handle p-1 -ml-1 rounded hover:bg-slate-100 dark:hover:bg-white/10 transition-colors lg:hidden">
+                                            <Icon name="drag_indicator" className="text-slate-400 dark:text-slate-500 text-[20px]" />
+                                        </div>
+                                        <h2 className="text-lg sm:text-xl font-bold tracking-tight text-text-main dark:text-white">
+                                            {viewMode === 'log' ? 'Log Expense' : 'Transaction History'}
+                                        </h2>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setViewMode(viewMode === 'log' ? 'history' : 'log')}
+                                            className={`p-2 rounded-full transition-colors ${viewMode === 'history' ? 'bg-primary/20 text-primary' : 'hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400'}`}
+                                        >
+                                            <Icon name={viewMode === 'log' ? "history" : "edit_square"} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto">
+                                    {viewMode === 'log' ? (
+                                        <div className="p-4 sm:p-6 flex flex-col gap-4 sm:gap-6 h-full">
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Who paid?</label>
+                                                    {suggestedPayer.person && suggestedPayer.person !== payer && (
+                                                        <Tooltip text={suggestedPayer.reason}>
+                                                            <button
+                                                                onClick={() => setPayer(suggestedPayer.person)}
+                                                                className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-dark transition-colors bg-primary/10 px-2 py-1 rounded-lg"
+                                                            >
+                                                                <Icon name="lightbulb" className="text-[16px]" filled />
+                                                                <span>{suggestedPayer.person} should pay</span>
+                                                                <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide ${suggestedPayer.confidence === 'high' ? 'bg-primary/20 text-primary-dark' :
+                                                                    suggestedPayer.confidence === 'medium' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                                        'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                                                                    }`}>
+                                                                    {suggestedPayer.confidence}
+                                                                </span>
+                                                            </button>
+                                                        </Tooltip>
+                                                    )}
+                                                </div>
+                                                <div className="relative">
+                                                    <select
+                                                        className="w-full appearance-none bg-[#f6f8f7] dark:bg-black/20 border-none rounded-xl py-4 pl-4 pr-10 text-lg font-bold text-[#111814] dark:text-white focus:ring-2 focus:ring-primary/50 cursor-pointer bg-none"
+                                                        value={payer}
+                                                        onChange={e => setPayer(e.target.value)}
+                                                    >
+                                                        {participants.map(p => <option key={p} value={p}>{p}</option>)}
+                                                    </select>
+                                                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                                                        <Icon name="expand_more" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                <div className="md:col-span-1 flex flex-col gap-2">
+                                                    <label className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Amount</label>
+                                                    <div className="relative">
+                                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl font-bold">$</span>
+                                                        <input
+                                                            className="w-full bg-[#f6f8f7] dark:bg-black/20 border-none rounded-xl py-4 pl-8 pr-4 text-2xl font-bold text-[#111814] dark:text-white focus:ring-2 focus:ring-primary/50 placeholder:text-slate-300"
+                                                            placeholder="0.00"
+                                                            type="number"
+                                                            value={amount}
+                                                            onChange={e => setAmount(e.target.value)}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="md:col-span-2 flex flex-col gap-2">
+                                                    <label className="text-sm font-semibold text-slate-500 uppercase tracking-wide">For what?</label>
+                                                    <div className="relative h-full">
+                                                        <input
+                                                            className="w-full h-full bg-[#f6f8f7] dark:bg-black/20 border-none rounded-xl py-4 pl-4 pr-4 text-lg font-medium text-[#111814] dark:text-white focus:ring-2 focus:ring-primary/50 placeholder:text-slate-300"
+                                                            placeholder="e.g. Dinner at Mario's"
+                                                            type="text"
+                                                            value={description}
+                                                            onChange={e => setDescription(e.target.value)}
+                                                        />
+                                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+                                                            <Icon name="receipt_long" />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col gap-3 mt-2 flex-1">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Split amongst</label>
+                                                    <button
+                                                        className="text-xs font-bold text-primary hover:text-primary-dark"
+                                                        onClick={() => {
+                                                            if (selectedBeneficiaries.size === participants.length) setSelectedBeneficiaries(new Set());
+                                                            else setSelectedBeneficiaries(new Set(participants));
+                                                        }}
+                                                    >
+                                                        {selectedBeneficiaries.size === participants.length ? 'Deselect All' : 'Select All'}
+                                                    </button>
+                                                </div>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                    {participants.map(p => {
+                                                        const isChecked = selectedBeneficiaries.has(p);
+                                                        const c = getAvatarColor(p);
+                                                        return (
+                                                            <label key={p} className="cursor-pointer group relative">
+                                                                <input
+                                                                    className="peer sr-only"
+                                                                    type="checkbox"
+                                                                    checked={isChecked}
+                                                                    onChange={() => {
+                                                                        setSelectedBeneficiaries(prev => {
+                                                                            const next = new Set(prev);
+                                                                            if (next.has(p)) next.delete(p); else next.add(p);
+                                                                            return next;
+                                                                        });
+                                                                    }}
+                                                                />
+                                                                <div className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${isChecked ? 'border-primary bg-primary/10 dark:bg-primary/20 text-[#111814] dark:text-white' : 'border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10'}`}>
+                                                                    <div className={`size-8 rounded-full ${c.bg} ${c.text} flex items-center justify-center text-sm font-bold shadow-sm ${!isChecked && 'opacity-60'}`}>{p.charAt(0)}</div>
+                                                                    <span className={`font-bold text-sm ${!isChecked && 'text-slate-500 dark:text-slate-400'}`}>{p}</span>
+                                                                    <Icon name="check_circle" filled className={`text-[18px] ml-auto transition-opacity ${isChecked ? 'text-primary opacity-100' : 'opacity-0'}`} />
+                                                                </div>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={submitExpense}
+                                                disabled={!amount || !payer || selectedBeneficiaries.size === 0}
+                                                className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-[#111814] text-lg font-bold py-4 rounded-xl transition-all shadow-md hover:shadow-lg active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed mt-4 mb-2"
+                                            >
+                                                <Icon name="add_circle" />
+                                                Save Expense
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        // HISTORY VIEW
+                                        <div className="flex flex-col h-full overflow-y-auto">
+                                            {expenses.length === 0 ? (
+                                                <div className="flex flex-col items-center justify-center py-20 opacity-50 text-slate-400">
+                                                    <Icon name="history_toggle_off" className="text-6xl mb-4" />
+                                                    <p>No expenses logged yet.</p>
+                                                </div>
+                                            ) : (
+                                                <div className="w-full text-left border-collapse">
+                                                    <div className="sticky top-0 bg-slate-50 dark:bg-[#15261d] text-xs font-bold text-slate-500 uppercase tracking-wider grid grid-cols-12 px-3 sm:px-6 py-3 border-b border-[#dce5df] dark:border-white/5 z-10">
+                                                        <div className="col-span-2">Date</div>
+                                                        <div className="col-span-4">Description</div>
+                                                        <div className="col-span-3">Participants</div>
+                                                        <div className="col-span-3 text-right">Payer & Amount</div>
+                                                    </div>
+                                                    <div className="divide-y divide-[#dce5df] dark:divide-white/5">
+                                                        {expenses.map((exp) => (
+                                                            <div key={exp.id} className="grid grid-cols-12 px-3 sm:px-6 py-3 sm:py-4 items-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                                                                <div className="col-span-2 flex flex-col">
+                                                                    <span className="font-bold text-text-main dark:text-white">{formatDate(exp.date)}</span>
+                                                                    <span className="text-xs text-slate-400">{formatTime(exp.date)}</span>
+                                                                </div>
+                                                                <div className="col-span-4 flex items-center gap-3">
+                                                                    <div className="size-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-500 dark:text-slate-300">
+                                                                        <Icon name="receipt" />
+                                                                    </div>
+                                                                    <div className="flex flex-col truncate pr-2">
+                                                                        <span className="font-bold text-text-main dark:text-white truncate">{exp.description}</span>
+                                                                        <span className="text-xs text-slate-400">Expense</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="col-span-3">
+                                                                    <div className="flex -space-x-2">
+                                                                        {exp.beneficiaries.slice(0, 4).map((b, i) => {
+                                                                            const c = getAvatarColor(b);
+                                                                            return (
+                                                                                <Tooltip key={i} text={b}>
+                                                                                    <div className={`size-8 rounded-full ${c.bg} ${c.text} flex items-center justify-center text-xs font-bold ring-2 ring-white dark:ring-[#1a2e22] cursor-default`}>
+                                                                                        {b.charAt(0)}
+                                                                                    </div>
+                                                                                </Tooltip>
+                                                                            );
+                                                                        })}
+                                                                        {exp.beneficiaries.length > 4 && (
+                                                                            <Tooltip text={exp.beneficiaries.slice(4).join(', ')}>
+                                                                                <div className="size-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold ring-2 ring-white dark:ring-[#1a2e22] cursor-default">
+                                                                                    +{exp.beneficiaries.length - 4}
+                                                                                </div>
+                                                                            </Tooltip>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="col-span-3 flex flex-col items-end">
+                                                                    <span className="text-lg font-bold text-text-main dark:text-white">{formatMoney(exp.amount)}</span>
+                                                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                                                        <div className={`size-4 rounded-full ${getAvatarColor(exp.payer).bg} flex items-center justify-center`}>
+                                                                            <span className={`text-[8px] font-bold ${getAvatarColor(exp.payer).text}`}>{exp.payer.charAt(0)}</span>
+                                                                        </div>
+                                                                        <span className="text-xs text-slate-500">{exp.payer} paid</span>
+                                                                    </div>
+                                                                    <span className="text-[10px] text-red-400 font-medium mt-0.5">
+                                                                        Split: {formatMoney(exp.amount / exp.beneficiaries.length)} ea.
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+
+                    case 'balances':
+                        return (
+                            <div key="balances" className="section-card bg-white dark:bg-[#1a2e22] rounded-xl p-4 sm:p-5 border border-[#dce5df] dark:border-white/5 shadow-sm" data-id="balances">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <div className="drag-handle p-1 -ml-1 rounded hover:bg-slate-100 dark:hover:bg-white/10 transition-colors lg:hidden">
+                                            <Icon name="drag_indicator" className="text-slate-400 dark:text-slate-500 text-[20px]" />
+                                        </div>
+                                        <h2 className="text-lg font-bold tracking-tight text-text-main dark:text-white">Real-time Balances</h2>
+                                    </div>
+                                </div>
+                                <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto pr-2">
+                                    {Array.from(getBalanceMap).map(([person, val]) => {
+                                        const isZero = Math.abs(val) < 0.01;
+                                        const isPositive = val > 0;
+                                        const isRemoved = !activeParticipantSet.has(person);
+                                        const c = getAvatarColor(person);
+                                        if (isRemoved && isZero) return null;
+                                        return (
+                                            <div key={person} className={`flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group ${isRemoved ? 'opacity-75 border border-dashed border-slate-300 dark:border-slate-600' : ''}`}>
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`size-10 rounded-full ${c.bg} ${c.text} flex items-center justify-center font-bold ${isRemoved ? 'grayscale' : ''}`}>{person.charAt(0)}</div>
+                                                    <div className="flex flex-col">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-bold text-sm text-text-main dark:text-white">{person}</span>
+                                                            {isRemoved && <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400">Left</span>}
+                                                        </div>
+                                                        <span className={`text-[10px] uppercase font-bold tracking-wide ${isZero ? 'text-slate-400' : isPositive ? 'text-primary' : 'text-red-500'}`}>
+                                                            {isZero ? 'Settled' : isPositive ? 'Gets back' : 'Owes'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span className={`text-lg font-bold ${isZero ? 'text-slate-300' : isPositive ? 'text-primary' : 'text-red-500'}`}>
+                                                    {isPositive ? '+' : ''}{formatMoney(val)}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        );
+
+                    case 'settlement':
+                        return (
+                            <div key="settlement" className="section-card bg-slate-900 text-white rounded-xl p-4 sm:p-6 border border-slate-800 shadow-xl flex flex-col relative overflow-hidden min-h-[300px]" data-id="settlement">
+                                <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+                                <div className="flex items-center gap-2 mb-6 z-10">
+                                    <div className="drag-handle p-1 -ml-1 rounded hover:bg-white/10 transition-colors lg:hidden">
+                                        <Icon name="drag_indicator" className="text-slate-500 text-[20px]" />
+                                    </div>
+                                    <div className="p-2 bg-white/10 rounded-lg">
+                                        <Icon name="hub" className="text-primary" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-lg font-bold tracking-tight text-white">Smart Settlement</h2>
+                                        <p className="text-xs text-slate-400">Optimized to minimize transactions</p>
+                                    </div>
+                                </div>
+                                <div className="flex flex-col gap-4 z-10 flex-1 overflow-y-auto pr-2">
+                                    {!isSolverLoaded ? (
+                                        <div className="text-center py-10 opacity-50">
+                                            <Icon name="sync" className="animate-spin text-2xl mb-2" />
+                                            <p className="text-xs">Loading Optimization Engine...</p>
+                                        </div>
+                                    ) : settlementPlan.length === 0 ? (
+                                        <div className="text-center py-10 opacity-50 flex flex-col items-center">
+                                            <div className="size-12 bg-white/10 rounded-full flex items-center justify-center mb-3">
+                                                <Icon name="check" className="text-primary" />
+                                            </div>
+                                            <p className="text-sm">All settled up!</p>
+                                            <p className="text-xs text-slate-500 mt-1">No transactions needed.</p>
+                                        </div>
+                                    ) : settlementPlan.map((txn, idx) => {
+                                        const cFrom = getAvatarColor(txn.from);
+                                        const cTo = getAvatarColor(txn.to);
+                                        const fromRemoved = !activeParticipantSet.has(txn.from);
+                                        const toRemoved = !activeParticipantSet.has(txn.to);
+                                        return (
+                                            <div key={idx} className="relative bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 group hover:bg-white/10 transition-colors">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`size-8 rounded-full ${cFrom.bg} ${cFrom.text} flex items-center justify-center font-bold text-xs ${fromRemoved ? 'grayscale ring-2 ring-dashed ring-slate-500' : ''}`}>{txn.from.charAt(0)}</div>
+                                                        <div className="flex flex-col">
+                                                            <span className="font-bold text-sm text-white">{txn.from}</span>
+                                                            {fromRemoved && <span className="text-[8px] text-slate-500 uppercase">Left</span>}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex-1 flex flex-col items-center">
+                                                        <div className="w-full h-px bg-white/10 relative">
+                                                            <Icon name="arrow_forward" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-slate-500 text-[16px] bg-slate-900 px-1" />
+                                                        </div>
+                                                        {txn.isStranger ? (
+                                                            <span className="mt-2 bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border border-red-500/20">Stranger Path</span>
+                                                        ) : (
+                                                            <span className="mt-2 bg-primary/20 text-primary text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border border-primary/20">Friend</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`size-8 rounded-full ${cTo.bg} ${cTo.text} flex items-center justify-center font-bold text-xs ${toRemoved ? 'grayscale ring-2 ring-dashed ring-slate-500' : ''}`}>{txn.to.charAt(0)}</div>
+                                                        <div className="flex flex-col">
+                                                            <span className="font-bold text-sm text-white">{txn.to}</span>
+                                                            {toRemoved && <span className="text-[8px] text-slate-500 uppercase">Left</span>}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex justify-between items-end mt-1">
+                                                    <span className="text-xs text-slate-400">Transfer</span>
+                                                    <span className="text-xl font-bold text-primary">{formatMoney(txn.amount)}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <div className="mt-auto pt-4 flex flex-col gap-2">
+                                    <button
+                                        onClick={downloadTSV}
+                                        className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Icon name="download" className="text-[18px]" />
+                                        Download TSV
+                                    </button>
+                                    <button
+                                        onClick={triggerImport}
+                                        className="w-full py-3 bg-transparent hover:bg-white/5 border border-transparent hover:border-white/10 rounded-lg text-sm text-slate-400 hover:text-white font-medium transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Icon name="upload" className="text-[18px]" />
+                                        Restore Backup
+                                    </button>
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        className="hidden"
+                                        accept=".tsv,.txt"
+                                        onChange={handleFileUpload}
+                                    />
+                                </div>
+                            </div>
+                        );
+
+                    default:
+                        return null;
+                }
+            };
 
             useEffect(() => {
                 if (typeof window.solver !== 'undefined') setIsSolverLoaded(true);
@@ -230,6 +1141,199 @@
                     return () => clearInterval(i);
                 }
             }, []);
+
+            // Initialize Sortable.js for each column
+            useEffect(() => {
+                const span = T.startSpan('initSortable', 'sortable');
+
+                // Wait until loading is complete and refs are available
+                if (isLoading) {
+                    span.log('debug', 'Waiting for app to finish loading...');
+                    span.end();
+                    return;
+                }
+
+                if (typeof Sortable === 'undefined') {
+                    span.log('warn', 'Sortable.js not loaded yet');
+                    span.end();
+                    return;
+                }
+
+                // Only enable drag-and-drop on mobile (below lg breakpoint: 1024px)
+                const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+                if (isDesktop) {
+                    span.log('info', 'Desktop detected - drag-and-drop disabled');
+                    span.end();
+                    return;
+                }
+
+                // Small delay to ensure DOM is fully rendered
+                const initTimeout = setTimeout(() => {
+                    span.log('info', 'Initializing Sortable.js for all columns...');
+                    span.log('debug', 'Checking refs...', {
+                        left: !!leftColumnRef.current,
+                        center: !!centerColumnRef.current,
+                        right: !!rightColumnRef.current
+                    });
+
+                    // Debug: Check if section cards exist
+                    if (leftColumnRef.current) {
+                        const leftCards = leftColumnRef.current.querySelectorAll('.section-card');
+                        span.log('debug', `Left column: ${leftCards.length} cards`, Array.from(leftCards).map(c => c.dataset.id));
+                    }
+                    if (centerColumnRef.current) {
+                        const centerCards = centerColumnRef.current.querySelectorAll('.section-card');
+                        span.log('debug', `Center column: ${centerCards.length} cards`, Array.from(centerCards).map(c => c.dataset.id));
+                    }
+                    if (rightColumnRef.current) {
+                        const rightCards = rightColumnRef.current.querySelectorAll('.section-card');
+                        span.log('debug', `Right column: ${rightCards.length} cards`, Array.from(rightCards).map(c => c.dataset.id));
+                    }
+
+                    const sortables = [];
+                    const options = {
+                        group: 'sections',
+                        animation: 150,
+                        handle: '.drag-handle',
+                        ghostClass: 'sortable-ghost',
+                        chosenClass: 'sortable-chosen',
+                        dragClass: 'sortable-drag',
+                        easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+                        forceFallback: true,
+                        fallbackTolerance: 3,
+                        onStart: (evt) => {
+                            const item = evt.item;
+                            const fromColumn = evt.from.dataset.column || 'unknown';
+                            T.interaction('dragStart', item.dataset.id, {
+                                fromColumn,
+                                fromIndex: evt.oldIndex
+                            });
+                        },
+                        onMove: (evt) => {
+                            const draggedItem = evt.dragged.dataset.id;
+                            const targetColumn = evt.to.dataset.column || 'unknown';
+                            T.trace('sortable', `Moving ${draggedItem}`, {
+                                toColumn: targetColumn,
+                                willInsertAfter: evt.related?.dataset?.id || 'start'
+                            });
+                        },
+                        onEnd: (evt) => {
+                            const dragSpan = T.startSpan('dragEnd', 'sortable');
+                            const item = evt.item;
+                            const itemId = item.dataset.id;
+                            const fromColumn = evt.from.dataset.column || 'unknown';
+                            const toColumn = evt.to.dataset.column || 'unknown';
+                            const oldIndex = evt.oldIndex;
+                            const newIndex = evt.newIndex;
+
+                            T.interaction('dragEnd', itemId, {
+                                fromColumn,
+                                toColumn,
+                                oldIndex,
+                                newIndex,
+                                movedToAnotherColumn: fromColumn !== toColumn
+                            });
+
+                            // CRITICAL: Revert the DOM move - let React handle DOM updates
+                            // This prevents the "removeChild" error caused by DOM/React conflicts
+                            if (fromColumn !== toColumn) {
+                                // Moved to different column - put it back
+                                const fromContainer = evt.from;
+                                const toContainer = evt.to;
+
+                                // Remove from new location
+                                toContainer.removeChild(item);
+
+                                // Insert back in original location
+                                if (fromContainer.children[oldIndex]) {
+                                    fromContainer.insertBefore(item, fromContainer.children[oldIndex]);
+                                } else {
+                                    fromContainer.appendChild(item);
+                                }
+
+                                T.debug('sortable', 'Reverted DOM move, React will handle update');
+                            } else if (oldIndex !== newIndex) {
+                                // Same column but different position - revert
+                                const container = evt.from;
+                                container.removeChild(item);
+
+                                if (container.children[oldIndex]) {
+                                    container.insertBefore(item, container.children[oldIndex]);
+                                } else {
+                                    container.appendChild(item);
+                                }
+
+                                T.debug('sortable', 'Reverted DOM reorder, React will handle update');
+                            }
+
+                            // Calculate new order based on the drag operation (not DOM state)
+                            setSectionOrder(prevOrder => {
+                                const newOrder = {
+                                    left: [...prevOrder.left],
+                                    center: [...prevOrder.center],
+                                    right: [...prevOrder.right]
+                                };
+
+                                // Remove from source
+                                const sourceArray = newOrder[fromColumn];
+                                sourceArray.splice(oldIndex, 1);
+
+                                // Insert at destination
+                                const destArray = newOrder[toColumn];
+                                destArray.splice(newIndex, 0, itemId);
+
+                                T.info('sortable', 'New section order', newOrder);
+                                localStorage.setItem('divvy_section_order', JSON.stringify(newOrder));
+                                T.stateChange('sectionOrder', prevOrder, newOrder);
+
+                                return newOrder;
+                            });
+
+                            dragSpan.end({ saved: true });
+                        }
+                    };
+
+                    if (leftColumnRef.current) {
+                        leftColumnRef.current.dataset.column = 'left';
+                        const sortable = new Sortable(leftColumnRef.current, options);
+                        sortables.push(sortable);
+                        span.log('debug', '✓ Left column initialized');
+                    } else {
+                        span.log('warn', '⚠️ Left column ref is null');
+                    }
+                    if (centerColumnRef.current) {
+                        centerColumnRef.current.dataset.column = 'center';
+                        const sortable = new Sortable(centerColumnRef.current, options);
+                        sortables.push(sortable);
+                        span.log('debug', '✓ Center column initialized');
+                    } else {
+                        span.log('warn', '⚠️ Center column ref is null');
+                    }
+                    if (rightColumnRef.current) {
+                        rightColumnRef.current.dataset.column = 'right';
+                        const sortable = new Sortable(rightColumnRef.current, options);
+                        sortables.push(sortable);
+                        span.log('debug', '✓ Right column initialized');
+                    } else {
+                        span.log('warn', '⚠️ Right column ref is null');
+                    }
+
+                    span.end({ totalInstances: sortables.length });
+                    T.info('sortable', `✅ All columns initialized. Total: ${sortables.length}`);
+
+                    // Store sortables for cleanup
+                    window._divvySortables = sortables;
+                }, 100);
+
+                return () => {
+                    clearTimeout(initTimeout);
+                    T.debug('sortable', '🧹 Cleaning up Sortable instances...');
+                    if (window._divvySortables) {
+                        window._divvySortables.forEach(s => s.destroy());
+                        window._divvySortables = null;
+                    }
+                };
+            }, [isLoading]);
 
             // First-load benefits overlay detection
             useEffect(() => {
@@ -253,12 +1357,15 @@
 
             // --- Database Loader ---
             const loadDataFromDB = async () => {
+                const span = T.startSpan('loadDataFromDB', 'database');
                 try {
                     const pCount = await db.participants.count();
                     const userHasReset = localStorage.getItem('divvy_user_reset') === 'true';
+                    span.log('debug', `Found ${pCount} participants, userHasReset=${userHasReset}`);
 
                     // Only add demo data if DB is empty AND user hasn't explicitly reset
                     if (pCount === 0 && !userHasReset) {
+                        span.log('info', 'Loading demo data for first-time user');
                         // Demo: Beach Weekend Trip with Friends
                         const defaults = ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'];
                         await db.participants.bulkAdd(defaults.map(name => ({ name })));
@@ -277,23 +1384,29 @@
 
                         // Demo stranger relationship - Jordan and Morgan met through different friend groups
                         await db.strangers.add({ pair: 'Jordan|Morgan' });
+                        span.log('info', 'Demo data loaded successfully');
                     }
 
                     const ps = await db.participants.toArray();
                     const pNames = ps.map(p => p.name);
                     setParticipants(pNames);
+                    span.log('debug', `Loaded ${pNames.length} participants`, pNames);
 
                     if (!payer && pNames.length > 0) setPayer(pNames[0]);
                     setSelectedBeneficiaries(new Set(pNames));
 
                     const exps = await db.expenses.toArray();
-                    setExpenses(exps.sort((a,b) => b.date - a.date));
+                    setExpenses(exps.sort((a, b) => b.date - a.date));
+                    span.log('debug', `Loaded ${exps.length} expenses`);
 
                     const strs = await db.strangers.toArray();
                     setStrangers(new Set(strs.map(s => s.pair)));
+                    span.log('debug', `Loaded ${strs.length} stranger relationships`);
 
+                    span.end({ participants: pNames.length, expenses: exps.length, strangers: strs.length });
                 } catch (err) {
-                    console.error("Failed to load DB:", err);
+                    span.error(err);
+                    T.error('database', 'Failed to load DB', { error: err.message });
                 } finally {
                     setIsLoading(false);
                 }
@@ -391,11 +1504,11 @@
             // Logic: Solver
             const settlementPlan = useMemo(() => {
                 if (!isSolverLoaded || typeof window.solver === 'undefined') return [];
-                
+
                 const balances = getBalanceMap;
                 const people = [];
                 const netAmounts = {};
-                
+
                 balances.forEach((val, name) => {
                     if (Math.abs(val) > 0.01) {
                         people.push(name);
@@ -422,10 +1535,10 @@
                 debtors.forEach(d => {
                     creditors.forEach(c => {
                         const isS = isStranger(d, c);
-                        const cost = isS ? 10000 : 1; 
+                        const cost = isS ? 10000 : 1;
                         const tVar = `T_${d}_${c}`;
                         const aVar = `A_${d}_${c}`;
-                        
+
                         model.variables[tVar] = { [d]: -1, [c]: 1, [`link_${d}_${c}`]: 1, cost: 0 };
                         model.variables[aVar] = { cost: cost, [`link_${d}_${c}`]: -bigM };
                         model.ints[aVar] = 1;
@@ -450,63 +1563,91 @@
             const addParticipant = async () => {
                 const name = newParticipant.trim();
                 if (name && !participants.includes(name)) {
-                    await db.participants.add({ name });
-                    setParticipants(prev => [...prev, name]);
-                    setSelectedBeneficiaries(prev => new Set(prev).add(name));
-                    setNewParticipant('');
-                    if (!payer) setPayer(name);
+                    T.interaction('addParticipant', name);
+                    const span = T.startSpan('addParticipant', 'participant');
+                    try {
+                        await db.participants.add({ name });
+                        setParticipants(prev => [...prev, name]);
+                        setSelectedBeneficiaries(prev => new Set(prev).add(name));
+                        setNewParticipant('');
+                        if (!payer) setPayer(name);
+                        span.end({ name, totalParticipants: participants.length + 1 });
+                    } catch (err) {
+                        span.error(err);
+                    }
                 }
             };
 
             const removeParticipant = async (name) => {
-                // Remove from active participants list (but keep their expenses & relationships frozen)
-                await db.participants.delete(name);
-                setParticipants(participants.filter(p => p !== name));
-                setSelectedBeneficiaries(prev => { const s = new Set(prev); s.delete(name); return s; });
+                T.interaction('removeParticipant', name);
+                const span = T.startSpan('removeParticipant', 'participant');
+                try {
+                    await db.participants.delete(name);
+                    setParticipants(participants.filter(p => p !== name));
+                    setSelectedBeneficiaries(prev => { const s = new Set(prev); s.delete(name); return s; });
 
-                // DON'T delete stranger relationships - keep them frozen for settlement calculations
-                // Stranger relationships are preserved so the solver still routes payments correctly
-
-                if (payer === name && participants.length > 1) {
-                    setPayer(participants.find(p => p !== name) || '');
+                    if (payer === name && participants.length > 1) {
+                        setPayer(participants.find(p => p !== name) || '');
+                    }
+                    span.end({ removed: name, remaining: participants.length - 1 });
+                } catch (err) {
+                    span.error(err);
                 }
             };
 
             const toggleStranger = async () => {
                 if (!strangerA || !strangerB || strangerA === strangerB) return;
                 const key = [strangerA, strangerB].sort().join('|');
-                
-                if (strangers.has(key)) {
-                    await db.strangers.delete(key);
-                    setStrangers(prev => { const next = new Set(prev); next.delete(key); return next; });
-                } else {
-                    await db.strangers.put({ pair: key });
-                    setStrangers(prev => { const next = new Set(prev); next.add(key); return next; });
+                T.interaction('toggleStranger', key);
+                const span = T.startSpan('toggleStranger', 'relationship');
+
+                try {
+                    if (strangers.has(key)) {
+                        await db.strangers.delete(key);
+                        setStrangers(prev => { const next = new Set(prev); next.delete(key); return next; });
+                        span.end({ action: 'removed', pair: key });
+                    } else {
+                        await db.strangers.put({ pair: key });
+                        setStrangers(prev => { const next = new Set(prev); next.add(key); return next; });
+                        span.end({ action: 'added', pair: key });
+                    }
+                } catch (err) {
+                    span.error(err);
                 }
             };
 
             const removeStrangerPair = async (pair) => {
-                await db.strangers.delete(pair);
-                setStrangers(prev => { const next = new Set(prev); next.delete(pair); return next; });
+                T.interaction('removeStrangerPair', pair);
+                const span = T.startSpan('removeStrangerPair', 'relationship');
+                try {
+                    await db.strangers.delete(pair);
+                    setStrangers(prev => { const next = new Set(prev); next.delete(pair); return next; });
+                    span.end({ removed: pair });
+                } catch (err) {
+                    span.error(err);
+                }
             };
 
             const resetTrip = async () => {
+                T.interaction('resetTrip', 'all');
+                const span = T.startSpan('resetTrip', 'database');
                 try {
-                    // Close the database connection
                     db.close();
-                    // Delete the entire database
                     await Dexie.delete('TripExpenseDB');
-                    // Mark that user explicitly reset (stored in localStorage)
                     localStorage.setItem('divvy_user_reset', 'true');
-                    // Reload the page to reinitialize
+                    span.end({ success: true });
+                    T.info('app', '🗑️ Trip data reset, reloading page...');
                     window.location.reload();
                 } catch (err) {
-                    console.error("Failed to reset:", err);
+                    span.error(err);
+                    T.error('database', 'Failed to reset trip', { error: err.message });
                     alert('Failed to reset trip data: ' + err.message);
                 }
             };
 
             const loadDemoData = async () => {
+                T.interaction('loadDemoData', 'demo');
+                const span = T.startSpan('loadDemoData', 'database');
                 try {
                     const defaults = ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'];
                     await db.participants.bulkAdd(defaults.map(name => ({ name })));
@@ -523,19 +1664,27 @@
                     await db.expenses.bulkAdd(demoExpenses);
                     await db.strangers.add({ pair: 'Jordan|Morgan' });
 
-                    // Clear the reset flag so demo loads properly
                     localStorage.removeItem('divvy_user_reset');
-                    // Reload to show demo data
+                    span.end({ participants: defaults.length, expenses: demoExpenses.length });
+                    T.info('app', '📦 Demo data loaded, reloading page...');
                     window.location.reload();
                 } catch (err) {
-                    console.error("Failed to load demo:", err);
+                    span.error(err);
+                    T.error('database', 'Failed to load demo data', { error: err.message });
                     alert('Failed to load demo data');
                 }
             };
 
             const submitExpense = async () => {
                 const val = parseFloat(amount);
-                if (!payer || isNaN(val) || val <= 0 || selectedBeneficiaries.size === 0) return;
+                if (!payer || isNaN(val) || val <= 0 || selectedBeneficiaries.size === 0) {
+                    T.warn('expense', 'Invalid expense submission', { payer, amount, beneficiaries: selectedBeneficiaries.size });
+                    return;
+                }
+
+                T.interaction('submitExpense', description || 'Untitled');
+                const span = T.startSpan('submitExpense', 'expense');
+
                 const newExpense = {
                     payer,
                     amount: val,
@@ -543,18 +1692,27 @@
                     beneficiaries: Array.from(selectedBeneficiaries),
                     date: new Date()
                 };
-                
-                const id = await db.expenses.add(newExpense);
-                setExpenses(prev => [{...newExpense, id}, ...prev]);
-                setAmount('');
-                setDescription('');
-                setViewMode('history');
+
+                try {
+                    const id = await db.expenses.add(newExpense);
+                    setExpenses(prev => [{ ...newExpense, id }, ...prev]);
+                    setAmount('');
+                    setDescription('');
+                    setViewMode('history');
+                    span.end({ id, amount: val, payer, beneficiaries: newExpense.beneficiaries.length });
+                    T.info('expense', `💰 New expense: ${formatMoney(val)} by ${payer}`, { description: newExpense.description });
+                } catch (err) {
+                    span.error(err);
+                }
             };
 
-            
+
             // --- IMPORT / EXPORT LOGIC ---
-            
+
             const downloadTSV = () => {
+                T.interaction('downloadTSV', 'export');
+                const span = T.startSpan('downloadTSV', 'export');
+
                 // Section 1: Expense History (Readable)
                 // Added ISO_TIMESTAMP and ID columns for robust restoration
                 let tsv = "EXPENSE HISTORY\n";
@@ -595,14 +1753,18 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `trip_backup_${new Date().toISOString().slice(0,10)}.tsv`;
+                a.download = `trip_backup_${new Date().toISOString().slice(0, 10)}.tsv`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
+
+                span.end({ expenses: expenses.length, participants: participants.length, strangers: strangers.size });
+                T.info('export', '📤 TSV backup downloaded', { filename: a.download });
             };
 
             const triggerImport = () => {
+                T.interaction('triggerImport', 'import');
                 fileInputRef.current?.click();
             };
 
@@ -610,11 +1772,15 @@
                 const file = event.target.files?.[0];
                 if (!file) return;
 
+                T.interaction('handleFileUpload', file.name);
+                const span = T.startSpan('handleFileUpload', 'import');
+
                 const reader = new FileReader();
                 reader.onload = async (e) => {
                     const text = e.target.result;
                     const lines = text.split('\n');
-                    
+                    span.log('debug', `Parsing ${lines.length} lines from ${file.name}`);
+
                     let section = 'UNKNOWN';
                     const newExpenses = [];
                     const newParticipants = new Set();
@@ -629,22 +1795,19 @@
                         if (line.startsWith('STRANGERS_DATA')) { section = 'STRANGERS'; continue; }
                         if (line.startsWith('OPTIMIZED SETTLEMENT PLAN')) { section = 'PLAN'; continue; }
                         if (line.startsWith('TOTAL SPENT')) continue;
-                        
+
                         // Skip headers
                         if (line.startsWith('Date\t') || line.startsWith('Name') || line.startsWith('Pair') || line.startsWith('From\t')) continue;
 
                         const cols = line.split('\t');
 
                         if (section === 'EXPENSES' && cols.length >= 4) {
-                            // Format: Date, Desc, Payer, Amount, Beneficiaries, ISO, ID
-                            // We prefer ISO timestamp if available (col 5), else fallback to current time (lossy restore)
-                            // Note: TSV columns index: 0=DateStr, 1=Desc, 2=Payer, 3=Amount, 4=Benes, 5=ISO, 6=ID
                             const amount = parseFloat(cols[3]);
                             if (!isNaN(amount)) {
                                 const isoDate = cols[5];
-                                const date = isoDate ? new Date(isoDate) : new Date(); // Fallback if old format
+                                const date = isoDate ? new Date(isoDate) : new Date();
                                 const beneficiaries = cols[4] ? cols[4].split(', ') : [];
-                                
+
                                 newExpenses.push({
                                     date,
                                     description: cols[1] || 'Imported Expense',
@@ -652,7 +1815,6 @@
                                     amount,
                                     beneficiaries
                                 });
-                                // Infer participants just in case
                                 newParticipants.add(cols[2]);
                                 beneficiaries.forEach(b => newParticipants.add(b));
                             }
@@ -663,6 +1825,12 @@
                         }
                     }
 
+                    span.log('info', 'Parsed data', {
+                        expenses: newExpenses.length,
+                        participants: newParticipants.size,
+                        strangers: newStrangers.size
+                    });
+
                     // Atomic Update
                     try {
                         await db.transaction('rw', db.participants, db.expenses, db.strangers, async () => {
@@ -670,27 +1838,28 @@
                             await db.expenses.clear();
                             await db.strangers.clear();
 
-                            // Sort participants for consistency
                             const sortedParticipants = Array.from(newParticipants).sort();
                             await db.participants.bulkAdd(sortedParticipants.map(name => ({ name })));
-                            
+
                             await db.expenses.bulkAdd(newExpenses);
-                            
+
                             const strangerArr = Array.from(newStrangers).map(pair => ({ pair }));
-                            if(strangerArr.length > 0) await db.strangers.bulkAdd(strangerArr);
+                            if (strangerArr.length > 0) await db.strangers.bulkAdd(strangerArr);
                         });
 
-                        // Reload State
+                        span.end({ success: true, expenses: newExpenses.length, participants: newParticipants.size });
+                        T.info('import', '📥 State restored successfully!', { filename: file.name });
+
                         loadDataFromDB();
                         alert('State successfully restored!');
                     } catch (err) {
-                        console.error(err);
+                        span.error(err);
+                        T.error('import', 'Failed to restore state', { error: err.message });
                         alert('Failed to restore state. Check file format.');
                     }
                 };
                 reader.readAsText(file);
-                // Reset input
-                event.target.value = ''; 
+                event.target.value = '';
             };
 
 
@@ -767,25 +1936,25 @@
 
                                 {/* Benefits List */}
                                 <div className="space-y-2 mb-6">
-                                    <BenefitItem 
-                                        icon="trending_down" 
-                                        title="Minimize Payments" 
-                                        description="Settle debts in fewer transactions using linear programming" 
+                                    <BenefitItem
+                                        icon="trending_down"
+                                        title="Minimize Payments"
+                                        description="Settle debts in fewer transactions using linear programming"
                                     />
-                                    <BenefitItem 
-                                        icon="people" 
-                                        title="Handle Awkward Moments" 
-                                        description="Mark strangers who haven't met — payments route through mutual friends" 
+                                    <BenefitItem
+                                        icon="people"
+                                        title="Handle Awkward Moments"
+                                        description="Mark strangers who haven't met — payments route through mutual friends"
                                     />
-                                    <BenefitItem 
-                                        icon="cloud_off" 
-                                        title="Works Offline" 
-                                        description="All data stored locally in your browser, no account needed" 
+                                    <BenefitItem
+                                        icon="cloud_off"
+                                        title="Works Offline"
+                                        description="All data stored locally in your browser, no account needed"
                                     />
-                                    <BenefitItem 
-                                        icon="download" 
-                                        title="Backup & Restore" 
-                                        description="Download TSV backups and restore anytime" 
+                                    <BenefitItem
+                                        icon="download"
+                                        title="Backup & Restore"
+                                        description="Download TSV backups and restore anytime"
                                     />
                                 </div>
 
@@ -826,501 +1995,50 @@
                         </div>
                     </header>
 
-                    <main className="flex-1 lg:overflow-hidden overflow-visible">
-                        <div className="lg:h-full h-auto w-full max-w-[1600px] mx-auto px-3 py-4 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 lg:overflow-y-auto overflow-visible">
-                            
+                    <main className="flex-1">
+                        <div className="w-full max-w-[1600px] mx-auto px-3 py-4 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
+
                             {/* --- Left Column (4) --- */}
-                            <div className="lg:col-span-4 flex flex-col gap-6 lg:h-full h-auto lg:overflow-hidden">
-                                
-                                {/* Participants */}
-                                <div className="bg-white dark:bg-[#1a2e22] rounded-xl p-4 sm:p-5 border border-[#dce5df] dark:border-white/5 shadow-sm flex flex-col gap-3 sm:gap-4 flex-shrink-0">
-                                    <div className="flex items-center justify-between">
-                                        <h2 className="text-lg font-bold tracking-tight text-text-main dark:text-white">Participants</h2>
-                                        <span className="bg-slate-100 dark:bg-white/10 text-xs font-bold px-2 py-1 rounded-md text-slate-600 dark:text-slate-300">{participants.length}</span>
-                                    </div>
-                                    <div className="flex flex-col gap-3">
-                                        <div className="relative group">
-                                            <input 
-                                                className="w-full bg-[#f6f8f7] dark:bg-black/20 border-none rounded-lg py-3 pl-4 pr-12 text-sm font-medium focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-slate-400 text-text-main dark:text-white" 
-                                                placeholder="Add new person..." 
-                                                type="text"
-                                                value={newParticipant}
-                                                onChange={e => setNewParticipant(e.target.value)}
-                                                onKeyDown={e => e.key === 'Enter' && addParticipant()}
-                                            />
-                                            <button 
-                                                onClick={addParticipant}
-                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 bg-white dark:bg-[#2a4032] rounded-md shadow-sm text-primary hover:text-primary-dark transition-colors"
-                                            >
-                                                <Icon name="add" className="text-[18px]" />
-                                            </button>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2 max-h-[150px] overflow-y-auto">
-                                            {participants.length === 0 ? (
-                                                <div className="w-full text-center py-4">
-                                                    <p className="text-sm text-slate-400 mb-3">No participants yet</p>
-                                                    <button
-                                                        onClick={loadDemoData}
-                                                        className="text-xs font-medium text-primary hover:text-primary-dark bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors"
-                                                    >
-                                                        Load Demo Trip
-                                                    </button>
-                                                </div>
-                                            ) : participants.map(p => {
-                                                const c = getAvatarColor(p);
-                                                return (
-                                                    <div key={p} className="flex items-center gap-2 bg-[#f0f4f2] dark:bg-white/5 rounded-full pl-2 pr-3 py-1.5 hover:bg-[#e2e8e5] dark:hover:bg-white/10 transition-colors cursor-pointer group select-none">
-                                                        <div className={`size-6 rounded-full ${c.bg} ${c.text} flex items-center justify-center text-xs font-bold`}>{p.charAt(0)}</div>
-                                                        <span className="text-sm font-medium text-text-main dark:text-white">{p}</span>
-                                                        <button onClick={e => { e.stopPropagation(); removeParticipant(p); }} className="hover:text-red-500 text-slate-400 dark:text-slate-500 flex items-center ml-1">
-                                                            <Icon name="close" className="text-[14px]" />
-                                                        </button>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
+                            {normalizedSectionOrder.left.length > 0 && (
+                                <div ref={leftColumnRef} className="sortable-container lg:col-span-4 flex flex-col gap-6">
+                                    {normalizedSectionOrder.left.map(sectionId => renderSection(sectionId))}
                                 </div>
-
-                                {/* Payment Restrictions - Made smaller/compact */}
-                                <div className="bg-white dark:bg-[#1a2e22] rounded-xl p-4 sm:p-5 border border-[#dce5df] dark:border-white/5 shadow-sm flex flex-col gap-3 sm:gap-4 max-h-[400px]">
-                                    <div className="flex items-center justify-between">
-                                        <h2 className="text-lg font-bold tracking-tight text-text-main dark:text-white">Payment Restrictions</h2>
-                                        <button 
-                                            onClick={() => setShowRelationshipManager(!showRelationshipManager)}
-                                            className="text-primary hover:text-primary-dark text-xs font-bold uppercase tracking-wide"
-                                        >
-                                            {showRelationshipManager ? 'Done' : 'Manage'}
-                                        </button>
-                                    </div>
-                                    
-                                    {showRelationshipManager && (
-                                        <div className="bg-slate-50 dark:bg-black/20 p-3 rounded-lg border border-slate-100 dark:border-white/5 flex flex-col gap-3">
-                                            <div className="flex gap-2">
-                                                <select
-                                                    className="flex-1 bg-white dark:bg-[#1a2e22] border-none rounded-lg text-sm p-2 shadow-sm focus:ring-1 focus:ring-primary text-text-main dark:text-white"
-                                                    value={strangerA}
-                                                    onChange={e => setStrangerA(e.target.value)}
-                                                >
-                                                    <option value="">Select person...</option>
-                                                    {participants.map(p => <option key={p} value={p}>{p}</option>)}
-                                                </select>
-                                                <select
-                                                    className="flex-1 bg-white dark:bg-[#1a2e22] border-none rounded-lg text-sm p-2 shadow-sm focus:ring-1 focus:ring-primary text-text-main dark:text-white"
-                                                    value={strangerB}
-                                                    onChange={e => setStrangerB(e.target.value)}
-                                                >
-                                                    <option value="">Select person...</option>
-                                                    {participants.filter(p => p !== strangerA).map(p => <option key={p} value={p}>{p}</option>)}
-                                                </select>
-                                            </div>
-                                            <button 
-                                                onClick={toggleStranger}
-                                                disabled={!strangerA || !strangerB}
-                                                className="w-full bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-slate-300 font-bold text-xs py-2 rounded-lg hover:bg-slate-300 dark:hover:bg-white/20 disabled:opacity-50 transition-colors"
-                                            >
-                                                Toggle Relationship
-                                            </button>
-                                        </div>
-                                    )}
-
-                                    <div className="flex flex-col gap-3 mt-2 overflow-y-auto pr-2 flex-1">
-                                        {strangers.size === 0 && !showRelationshipManager && (
-                                            <div className="text-center py-4 opacity-50">
-                                                <Icon name="groups" className="text-3xl text-slate-300 mb-2" />
-                                                <p className="text-xs text-slate-400">Everyone knows everyone.</p>
-                                            </div>
-                                        )}
-                                        {Array.from(strangers).map(pair => {
-                                            const [p1, p2] = pair.split('|');
-                                            const c1 = getAvatarColor(p1);
-                                            const c2 = getAvatarColor(p2);
-                                            const p1Removed = !activeParticipantSet.has(p1);
-                                            const p2Removed = !activeParticipantSet.has(p2);
-                                            const isFrozen = p1Removed || p2Removed;
-                                            return (
-                                                <div key={pair} className={`flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-black/20 border ${isFrozen ? 'border-dashed border-slate-300 dark:border-slate-600 opacity-60' : 'border-slate-100 dark:border-white/5'}`}>
-                                                    <div className="flex items-center -space-x-2">
-                                                        <div className={`size-8 rounded-full ${c1.bg} ${c1.text} flex items-center justify-center text-xs font-bold ring-2 ring-white dark:ring-[#1a2e22] ${p1Removed ? 'grayscale' : ''}`}>{p1.charAt(0)}</div>
-                                                        <div className={`size-8 rounded-full ${c2.bg} ${c2.text} flex items-center justify-center text-xs font-bold ring-2 ring-white dark:ring-[#1a2e22] ${p2Removed ? 'grayscale' : ''}`}>{p2.charAt(0)}</div>
-                                                    </div>
-                                                    <div className="flex flex-col items-end">
-                                                        {isFrozen ? (
-                                                            <span className="text-xs font-bold text-slate-500 bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full mb-1">Frozen</span>
-                                                        ) : (
-                                                            <span className="text-xs font-bold text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded-full mb-1">Strangers</span>
-                                                        )}
-                                                        <span className="text-[10px] text-slate-400">{p1} & {p2}</span>
-                                                    </div>
-                                                    {showRelationshipManager && !isFrozen && (
-                                                        <button onClick={() => removeStrangerPair(pair)} className="ml-2 text-slate-400 hover:text-red-500">
-                                                            <Icon name="delete" className="text-[18px]" />
-                                                        </button>
-                                                    )}
-                                                    {showRelationshipManager && isFrozen && (
-                                                        <Tooltip text="Can't edit - participant left">
-                                                            <Icon name="lock" className="ml-2 text-[16px] text-slate-400" />
-                                                        </Tooltip>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </div>
+                            )}
 
                             {/* --- Center Column (5) --- */}
-                            <div className="lg:col-span-5 flex flex-col lg:h-full h-[600px]">
-                                <div className="bg-white dark:bg-[#1a2e22] rounded-xl border border-[#dce5df] dark:border-white/5 shadow-lg h-full flex flex-col">
-                                    <div className="p-4 sm:p-6 border-b border-[#dce5df] dark:border-white/5 flex justify-between items-center">
-                                        <h2 className="text-lg sm:text-xl font-bold tracking-tight text-text-main dark:text-white">
-                                            {viewMode === 'log' ? 'Log Expense' : 'Transaction History'}
-                                        </h2>
-                                        <div className="flex gap-2">
-                                            <button 
-                                                onClick={() => setViewMode(viewMode === 'log' ? 'history' : 'log')}
-                                                className={`p-2 rounded-full transition-colors ${viewMode === 'history' ? 'bg-primary/20 text-primary' : 'hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400'}`}
-                                            >
-                                                <Icon name={viewMode === 'log' ? "history" : "edit_square"} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="flex-1 overflow-y-auto">
-                                        {viewMode === 'log' ? (
-                                            <div className="p-4 sm:p-6 flex flex-col gap-4 sm:gap-6 h-full">
-                                                <div className="flex flex-col gap-2">
-                                                    <div className="flex justify-between items-center">
-                                                        <label className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Who paid?</label>
-                                                        {suggestedPayer.person && suggestedPayer.person !== payer && (
-                                                            <Tooltip text={suggestedPayer.reason}>
-                                                                <button
-                                                                    onClick={() => setPayer(suggestedPayer.person)}
-                                                                    className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-dark transition-colors bg-primary/10 px-2 py-1 rounded-lg"
-                                                                >
-                                                                    <Icon name="lightbulb" className="text-[16px]" filled />
-                                                                    <span>{suggestedPayer.person} should pay</span>
-                                                                    <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide ${
-                                                                        suggestedPayer.confidence === 'high' ? 'bg-primary/20 text-primary-dark' :
-                                                                        suggestedPayer.confidence === 'medium' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                                        'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
-                                                                    }`}>
-                                                                        {suggestedPayer.confidence}
-                                                                    </span>
-                                                                </button>
-                                                            </Tooltip>
-                                                        )}
-                                                    </div>
-                                                    <div className="relative">
-                                                        <select 
-                                                            className="w-full appearance-none bg-[#f6f8f7] dark:bg-black/20 border-none rounded-xl py-4 pl-4 pr-10 text-lg font-bold text-[#111814] dark:text-white focus:ring-2 focus:ring-primary/50 cursor-pointer bg-none"
-                                                            value={payer}
-                                                            onChange={e => setPayer(e.target.value)}
-                                                        >
-                                                            {participants.map(p => <option key={p} value={p}>{p}</option>)}
-                                                        </select>
-                                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
-                                                            <Icon name="expand_more" />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                    <div className="md:col-span-1 flex flex-col gap-2">
-                                                        <label className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Amount</label>
-                                                        <div className="relative">
-                                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl font-bold">$</span>
-                                                            <input 
-                                                                className="w-full bg-[#f6f8f7] dark:bg-black/20 border-none rounded-xl py-4 pl-8 pr-4 text-2xl font-bold text-[#111814] dark:text-white focus:ring-2 focus:ring-primary/50 placeholder:text-slate-300" 
-                                                                placeholder="0.00" 
-                                                                type="number"
-                                                                value={amount}
-                                                                onChange={e => setAmount(e.target.value)}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div className="md:col-span-2 flex flex-col gap-2">
-                                                        <label className="text-sm font-semibold text-slate-500 uppercase tracking-wide">For what?</label>
-                                                        <div className="relative h-full">
-                                                            <input 
-                                                                className="w-full h-full bg-[#f6f8f7] dark:bg-black/20 border-none rounded-xl py-4 pl-4 pr-4 text-lg font-medium text-[#111814] dark:text-white focus:ring-2 focus:ring-primary/50 placeholder:text-slate-300" 
-                                                                placeholder="e.g. Dinner at Mario's" 
-                                                                type="text"
-                                                                value={description}
-                                                                onChange={e => setDescription(e.target.value)}
-                                                            />
-                                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
-                                                                <Icon name="receipt_long" />
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="flex flex-col gap-3 mt-2 flex-1">
-                                                    <div className="flex items-center justify-between">
-                                                        <label className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Split amongst</label>
-                                                        <button 
-                                                            className="text-xs font-bold text-primary hover:text-primary-dark"
-                                                            onClick={() => {
-                                                                if(selectedBeneficiaries.size === participants.length) setSelectedBeneficiaries(new Set());
-                                                                else setSelectedBeneficiaries(new Set(participants));
-                                                            }}
-                                                        >
-                                                            {selectedBeneficiaries.size === participants.length ? 'Deselect All' : 'Select All'}
-                                                        </button>
-                                                    </div>
-                                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                                        {participants.map(p => {
-                                                            const isChecked = selectedBeneficiaries.has(p);
-                                                            const c = getAvatarColor(p);
-                                                            return (
-                                                                <label key={p} className="cursor-pointer group relative">
-                                                                    <input 
-                                                                        className="peer sr-only" 
-                                                                        type="checkbox"
-                                                                        checked={isChecked}
-                                                                        onChange={() => {
-                                                                            setSelectedBeneficiaries(prev => {
-                                                                                const next = new Set(prev);
-                                                                                if(next.has(p)) next.delete(p); else next.add(p);
-                                                                                return next;
-                                                                            });
-                                                                        }}
-                                                                    />
-                                                                    <div className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${isChecked ? 'border-primary bg-primary/10 dark:bg-primary/20 text-[#111814] dark:text-white' : 'border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10'}`}>
-                                                                        <div className={`size-8 rounded-full ${c.bg} ${c.text} flex items-center justify-center text-sm font-bold shadow-sm ${!isChecked && 'opacity-60'}`}>{p.charAt(0)}</div>
-                                                                        <span className={`font-bold text-sm ${!isChecked && 'text-slate-500 dark:text-slate-400'}`}>{p}</span>
-                                                                        <Icon name="check_circle" filled className={`text-[18px] ml-auto transition-opacity ${isChecked ? 'text-primary opacity-100' : 'opacity-0'}`} />
-                                                                    </div>
-                                                                </label>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    onClick={submitExpense}
-                                                    disabled={!amount || !payer || selectedBeneficiaries.size === 0}
-                                                    className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-[#111814] text-lg font-bold py-4 rounded-xl transition-all shadow-md hover:shadow-lg active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed mt-4 mb-2"
-                                                >
-                                                    <Icon name="add_circle" />
-                                                    Save Expense
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            // HISTORY VIEW
-                                            <div className="flex flex-col h-full overflow-y-auto">
-                                                {expenses.length === 0 ? (
-                                                    <div className="flex flex-col items-center justify-center py-20 opacity-50 text-slate-400">
-                                                        <Icon name="history_toggle_off" className="text-6xl mb-4" />
-                                                        <p>No expenses logged yet.</p>
-                                                    </div>
-                                                ) : (
-                                                    <div className="w-full text-left border-collapse">
-                                                        <div className="sticky top-0 bg-slate-50 dark:bg-[#15261d] text-xs font-bold text-slate-500 uppercase tracking-wider grid grid-cols-12 px-3 sm:px-6 py-3 border-b border-[#dce5df] dark:border-white/5 z-10">
-                                                            <div className="col-span-2">Date</div>
-                                                            <div className="col-span-4">Description</div>
-                                                            <div className="col-span-3">Participants</div>
-                                                            <div className="col-span-3 text-right">Payer & Amount</div>
-                                                        </div>
-                                                        <div className="divide-y divide-[#dce5df] dark:divide-white/5">
-                                                            {expenses.map((exp) => (
-                                                                <div key={exp.id} className="grid grid-cols-12 px-3 sm:px-6 py-3 sm:py-4 items-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
-                                                                    {/* Date */}
-                                                                    <div className="col-span-2 flex flex-col">
-                                                                        <span className="font-bold text-text-main dark:text-white">{formatDate(exp.date)}</span>
-                                                                        <span className="text-xs text-slate-400">{formatTime(exp.date)}</span>
-                                                                    </div>
-                                                                    
-                                                                    {/* Description */}
-                                                                    <div className="col-span-4 flex items-center gap-3">
-                                                                        <div className="size-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-500 dark:text-slate-300">
-                                                                            <Icon name="receipt" />
-                                                                        </div>
-                                                                        <div className="flex flex-col truncate pr-2">
-                                                                            <span className="font-bold text-text-main dark:text-white truncate">{exp.description}</span>
-                                                                            <span className="text-xs text-slate-400">Expense</span>
-                                                                        </div>
-                                                                    </div>
-                                                                    
-                                                                    {/* Participants */}
-                                                                    <div className="col-span-3">
-                                                                        <div className="flex -space-x-2">
-                                                                            {exp.beneficiaries.slice(0, 4).map((b, i) => {
-                                                                                const c = getAvatarColor(b);
-                                                                                return (
-                                                                                    <Tooltip key={i} text={b}>
-                                                                                        <div className={`size-8 rounded-full ${c.bg} ${c.text} flex items-center justify-center text-xs font-bold ring-2 ring-white dark:ring-[#1a2e22] cursor-default`}>
-                                                                                            {b.charAt(0)}
-                                                                                        </div>
-                                                                                    </Tooltip>
-                                                                                );
-                                                                            })}
-                                                                            {exp.beneficiaries.length > 4 && (
-                                                                                <Tooltip text={exp.beneficiaries.slice(4).join(', ')}>
-                                                                                    <div className="size-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold ring-2 ring-white dark:ring-[#1a2e22] cursor-default">
-                                                                                        +{exp.beneficiaries.length - 4}
-                                                                                    </div>
-                                                                                </Tooltip>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                    
-                                                                    {/* Payer & Amount */}
-                                                                    <div className="col-span-3 flex flex-col items-end">
-                                                                        <span className="text-lg font-bold text-text-main dark:text-white">{formatMoney(exp.amount)}</span>
-                                                                        <div className="flex items-center gap-1.5 mt-0.5">
-                                                                            <div className={`size-4 rounded-full ${getAvatarColor(exp.payer).bg} flex items-center justify-center`}>
-                                                                                <span className={`text-[8px] font-bold ${getAvatarColor(exp.payer).text}`}>{exp.payer.charAt(0)}</span>
-                                                                            </div>
-                                                                            <span className="text-xs text-slate-500">{exp.payer} paid</span>
-                                                                        </div>
-                                                                        <span className="text-[10px] text-red-400 font-medium mt-0.5">
-                                                                            Split: {formatMoney(exp.amount / exp.beneficiaries.length)} ea.
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
+                            {normalizedSectionOrder.center.length > 0 && (
+                                <div ref={centerColumnRef} className="sortable-container lg:col-span-5 flex flex-col min-h-[400px]">
+                                    {normalizedSectionOrder.center.map(sectionId => renderSection(sectionId))}
                                 </div>
-                            </div>
+                            )}
 
                             {/* --- Right Column (3) --- */}
-                            <div className="lg:col-span-3 flex flex-col gap-6 lg:h-full lg:overflow-hidden">
-                                
-                                {/* Real-time Balances */}
-                                <div className="bg-white dark:bg-[#1a2e22] rounded-xl p-4 sm:p-5 border border-[#dce5df] dark:border-white/5 shadow-sm flex-shrink-0">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h2 className="text-lg font-bold tracking-tight text-text-main dark:text-white">Real-time Balances</h2>
-                                    </div>
-                                    <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto pr-2">
-                                        {Array.from(getBalanceMap).map(([person, val]) => {
-                                            const isZero = Math.abs(val) < 0.01;
-                                            const isPositive = val > 0;
-                                            const isRemoved = !activeParticipantSet.has(person);
-                                            const c = getAvatarColor(person);
-                                            // Don't show removed participants if they're settled
-                                            if (isRemoved && isZero) return null;
-                                            return (
-                                                <div key={person} className={`flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group ${isRemoved ? 'opacity-75 border border-dashed border-slate-300 dark:border-slate-600' : ''}`}>
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`size-10 rounded-full ${c.bg} ${c.text} flex items-center justify-center font-bold ${isRemoved ? 'grayscale' : ''}`}>{person.charAt(0)}</div>
-                                                        <div className="flex flex-col">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="font-bold text-sm text-text-main dark:text-white">{person}</span>
-                                                                {isRemoved && <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400">Left</span>}
-                                                            </div>
-                                                            <span className={`text-[10px] uppercase font-bold tracking-wide ${isZero ? 'text-slate-400' : isPositive ? 'text-primary' : 'text-red-500'}`}>
-                                                                {isZero ? 'Settled' : isPositive ? 'Gets back' : 'Owes'}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <span className={`text-lg font-bold ${isZero ? 'text-slate-300' : isPositive ? 'text-primary' : 'text-red-500'}`}>
-                                                        {isPositive ? '+' : ''}{formatMoney(val)}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                            {normalizedSectionOrder.right.length > 0 && (
+                                <div ref={rightColumnRef} className="sortable-container lg:col-span-3 flex flex-col gap-6">
+                                    {normalizedSectionOrder.right.map(sectionId => renderSection(sectionId))}
                                 </div>
-
-                                {/* Smart Settlement */}
-                                <div className="bg-slate-900 text-white rounded-xl p-4 sm:p-6 border border-slate-800 shadow-xl lg:flex-1 lg:min-h-0 flex flex-col relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
-                                    <div className="flex items-center gap-2 mb-6 z-10">
-                                        <div className="p-2 bg-white/10 rounded-lg">
-                                            <Icon name="hub" className="text-primary" />
-                                        </div>
-                                        <div>
-                                            <h2 className="text-lg font-bold tracking-tight text-white">Smart Settlement</h2>
-                                            <p className="text-xs text-slate-400">Optimized to minimize transactions</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex flex-col gap-4 z-10 flex-1 overflow-y-auto pr-2">
-                                        {!isSolverLoaded ? (
-                                            <div className="text-center py-10 opacity-50">
-                                                <Icon name="sync" className="animate-spin text-2xl mb-2"/>
-                                                <p className="text-xs">Loading Optimization Engine...</p>
-                                            </div>
-                                        ) : settlementPlan.length === 0 ? (
-                                            <div className="text-center py-10 opacity-50 flex flex-col items-center">
-                                                <div className="size-12 bg-white/10 rounded-full flex items-center justify-center mb-3">
-                                                    <Icon name="check" className="text-primary" />
-                                                </div>
-                                                <p className="text-sm">All settled up!</p>
-                                                <p className="text-xs text-slate-500 mt-1">No transactions needed.</p>
-                                            </div>
-                                        ) : settlementPlan.map((txn, idx) => {
-                                            const cFrom = getAvatarColor(txn.from);
-                                            const cTo = getAvatarColor(txn.to);
-                                            const fromRemoved = !activeParticipantSet.has(txn.from);
-                                            const toRemoved = !activeParticipantSet.has(txn.to);
-                                            return (
-                                                <div key={idx} className="relative bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 group hover:bg-white/10 transition-colors">
-                                                    <div className="flex items-center gap-4">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className={`size-8 rounded-full ${cFrom.bg} ${cFrom.text} flex items-center justify-center font-bold text-xs ${fromRemoved ? 'grayscale ring-2 ring-dashed ring-slate-500' : ''}`}>{txn.from.charAt(0)}</div>
-                                                            <div className="flex flex-col">
-                                                                <span className="font-bold text-sm text-white">{txn.from}</span>
-                                                                {fromRemoved && <span className="text-[8px] text-slate-500 uppercase">Left</span>}
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex-1 flex flex-col items-center">
-                                                            <div className="w-full h-px bg-white/10 relative">
-                                                                <Icon name="arrow_forward" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-slate-500 text-[16px] bg-slate-900 px-1" />
-                                                            </div>
-                                                            {txn.isStranger ? (
-                                                                <span className="mt-2 bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border border-red-500/20">Stranger Path</span>
-                                                            ) : (
-                                                                <span className="mt-2 bg-primary/20 text-primary text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border border-primary/20">Friend</span>
-                                                            )}
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <div className={`size-8 rounded-full ${cTo.bg} ${cTo.text} flex items-center justify-center font-bold text-xs ${toRemoved ? 'grayscale ring-2 ring-dashed ring-slate-500' : ''}`}>{txn.to.charAt(0)}</div>
-                                                            <div className="flex flex-col">
-                                                                <span className="font-bold text-sm text-white">{txn.to}</span>
-                                                                {toRemoved && <span className="text-[8px] text-slate-500 uppercase">Left</span>}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex justify-between items-end mt-1">
-                                                        <span className="text-xs text-slate-400">Transfer</span>
-                                                        <span className="text-xl font-bold text-primary">{formatMoney(txn.amount)}</span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                    <div className="mt-auto pt-4 flex flex-col gap-2">
-                                        <button
-                                            onClick={downloadTSV}
-                                            className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            <Icon name="download" className="text-[18px]" />
-                                            Download TSV
-                                        </button>
-                                        <button 
-                                            onClick={triggerImport}
-                                            className="w-full py-3 bg-transparent hover:bg-white/5 border border-transparent hover:border-white/10 rounded-lg text-sm text-slate-400 hover:text-white font-medium transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            <Icon name="upload" className="text-[18px]" />
-                                            Restore Backup
-                                        </button>
-                                        {/* Hidden File Input */}
-                                        <input 
-                                            type="file" 
-                                            ref={fileInputRef}
-                                            className="hidden" 
-                                            accept=".tsv,.txt"
-                                            onChange={handleFileUpload}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
+                            )}
                         </div>
                     </main>
+
+                    {/* Footer */}
+                    <footer className="py-4 px-4 sm:px-8 border-t border-[#dce5df] dark:border-white/10 bg-white dark:bg-[#1a2e22]">
+                        <div className="flex items-center justify-center gap-2">
+                            <picture>
+                                <source srcSet="images/made-with-example.webp" type="image/webp" />
+                                <img
+                                    src="images/made-with-example.png"
+                                    alt="Snoopy"
+                                    width="32"
+                                    height="32"
+                                    className="h-8 w-auto"
+                                />
+                            </picture>
+                            <span className="text-sm text-slate-500 dark:text-slate-400">Made with</span>
+                            <Icon name="favorite" className="text-red-500 text-[18px]" filled />
+                            <span className="text-sm text-slate-500 dark:text-slate-400">by Hunar</span>
+                        </div>
+                    </footer>
                 </>
             );
         };
@@ -1331,9 +2049,10 @@
 
     <!-- Service Worker Registration -->
     <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
-    }
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
     </script>
 </body>
+
 </html>
