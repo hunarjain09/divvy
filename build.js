@@ -125,16 +125,22 @@ body {
 
   // Remove the inline Tailwind config script, Babel script, and React script
   let productionHtml = htmlContent
-    // Remove Tailwind CDN
-    .replace(/<script src="https:\/\/cdn\.tailwindcss\.com[^"]*"><\/script>\s*/g, '')
+    // Remove Tailwind CDN (check with and without quotes around URL)
+    .replace(/<script[^>]*src=["']https:\/\/cdn\.tailwindcss\.com[^>]*><\/script>\s*/gi, '')
     // Remove Tailwind config script
     .replace(/<script>\s*tailwind\.config[\s\S]*?<\/script>\s*/g, '')
     // Remove inline styles (we'll use external CSS)
     .replace(/<style>[\s\S]*?<\/style>\s*/g, '')
     // Remove Babel standalone
-    .replace(/<script src="https:\/\/unpkg\.com\/@babel\/standalone\/babel\.min\.js"><\/script>\s*/g, '')
+    .replace(/<script[^>]*src=["']https:\/\/unpkg\.com\/@babel\/standalone[^>]*><\/script>\s*/gi, '')
     // Remove the React script
     .replace(/<script type="text\/babel"[^>]*>[\s\S]*?<\/script>\s*/g, '');
+
+  // Fix import map to include react/jsx-runtime
+  productionHtml = productionHtml.replace(
+    /"react-dom\/client":\s*"[^"]+"/,
+    match => match + ',\n                "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime"'
+  );
 
   // Add production CSS and JS before </head>
   const headCloseIndex = productionHtml.indexOf('</head>');

@@ -1,19 +1,17 @@
-const CACHE_NAME = 'divvy-v1';
+const CACHE_NAME = 'divvy-v2';
 const ASSETS_TO_CACHE = [
   './',
-  './divvy.html',
+  './index.html',
+  './app.js',
+  './styles.css',
   './manifest.json',
   './icons/icon-192x192.png',
   './icons/icon-512x512.png',
-  'https://cdn.tailwindcss.com?plugins=forms,container-queries',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap',
-  'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap',
-  'https://unpkg.com/javascript-lp-solver@0.4.24/prod/solver.js',
-  'https://unpkg.com/dexie@3.2.4/dist/dexie.js',
-  'https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js',
-  'https://unpkg.com/@babel/standalone/babel.min.js',
-  'https://esm.sh/react@18.2.0',
-  'https://esm.sh/react-dom@18.2.0/client'
+  './icons/divvy-icon.svg',
+  './images/made-with-example.png',
+  './images/made-with-example.webp'
+  // Note: CDN resources (React, Dexie, LP solver, etc.) are fetched from network
+  // and cached dynamically on first use via the fetch event handler
 ];
 
 // Install event - cache assets
@@ -42,17 +40,35 @@ self.addEventListener('activate', (event) => {
 
 // Fetch event - network first, fall back to cache
 self.addEventListener('fetch', (event) => {
+  // Skip cross-origin requests that might be blocked by tracking prevention
+  const url = new URL(event.request.url);
+  const isSameOrigin = url.origin === location.origin;
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Clone the response before caching
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
-        });
+        // Only cache successful responses from same origin or CDN resources
+        if (response && response.status === 200) {
+          const shouldCache = isSameOrigin ||
+                            url.hostname.includes('esm.sh') ||
+                            url.hostname.includes('unpkg.com') ||
+                            url.hostname.includes('cdn.jsdelivr.net') ||
+                            url.hostname.includes('fonts.googleapis.com') ||
+                            url.hostname.includes('fonts.gstatic.com');
+
+          if (shouldCache) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseClone).catch(() => {
+                // Ignore cache errors (e.g., from tracking prevention)
+              });
+            });
+          }
+        }
         return response;
       })
       .catch(() => {
+        // Fall back to cache
         return caches.match(event.request);
       })
   );
