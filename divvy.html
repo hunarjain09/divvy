@@ -1520,7 +1520,7 @@
                 const sheet = await sheetsApi('', {
                     method: 'POST',
                     body: JSON.stringify({
-                        properties: { title: 'Divvy Trip Expenses' },
+                        properties: { title: `${new Date().toISOString().slice(0, 16).replace('T', ' ')} Divvy Trip Expenses` },
                         sheets: [
                             { properties: { title: 'Expenses', index: 0 } },
                             { properties: { title: 'Participants', index: 1 } },
