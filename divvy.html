@@ -680,12 +680,12 @@
                                             onChange={e => setNewParticipant(e.target.value)}
                                             onKeyDown={e => e.key === 'Enter' && addParticipant()}
                                         />
-                                        <button
+                                        {newParticipant.trim() && <button
                                             onClick={addParticipant}
                                             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 bg-white dark:bg-[#2a4032] rounded-md shadow-sm text-primary hover:text-primary-dark transition-colors"
                                         >
                                             <Icon name="add" className="text-[18px]" />
-                                        </button>
+                                        </button>}
                                     </div>
                                     <div className="flex flex-wrap gap-2 max-h-[150px] overflow-y-auto">
                                         {participants.length === 0 ? (
