@@ -1398,32 +1398,7 @@
                 const span = T.startSpan('loadDataFromDB', 'database');
                 try {
                     const pCount = await db.participants.count();
-                    const userHasReset = localStorage.getItem('divvy_user_reset') === 'true';
-                    span.log('debug', `Found ${pCount} participants, userHasReset=${userHasReset}`);
-
-                    // Only add demo data if DB is empty AND user hasn't explicitly reset
-                    if (pCount === 0 && !userHasReset) {
-                        span.log('info', 'Loading demo data for first-time user');
-                        // Demo: Beach Weekend Trip with Friends
-                        const defaults = ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'];
-                        await db.participants.bulkAdd(defaults.map(name => ({ name })));
-
-                        // Demo expenses - a realistic beach trip
-                        const demoExpenses = [
-                            { payer: 'Alex', amount: 180, description: 'Airbnb (2 nights)', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Jordan', amount: 65, description: 'Grocery run', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2.5 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Sam', amount: 120, description: 'Surf board rentals', beneficiaries: ['Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Riley', amount: 85, description: 'Seafood dinner', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Alex', amount: 40, description: 'Beach bonfire supplies', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Morgan', amount: 55, description: 'Breakfast & coffee', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 0.5 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Jordan', amount: 30, description: 'Gas money', beneficiaries: ['Alex', 'Jordan', 'Riley'], date: new Date() },
-                        ];
-                        await db.expenses.bulkAdd(demoExpenses);
-
-                        // Demo stranger relationship - Jordan and Morgan met through different friend groups
-                        await db.strangers.add({ pair: 'Jordan|Morgan' });
-                        span.log('info', 'Demo data loaded successfully');
-                    }
+                    span.log('debug', `Found ${pCount} participants`);
 
                     const ps = await db.participants.toArray();
                     const pNames = ps.map(p => p.name);
