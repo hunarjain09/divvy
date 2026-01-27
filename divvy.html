@@ -1806,6 +1806,23 @@
                 }
             }, []);
 
+            // Auto-sync when app becomes visible or on initial auth
+            useEffect(() => {
+                if (!accessToken || !sheetId) return;
+
+                // Sync once on initial connect (e.g. returning user opens app)
+                syncWithSheet();
+
+                const handleVisibility = () => {
+                    if (document.visibilityState === 'visible') {
+                        T.info('sync', 'App became visible, auto-syncing...');
+                        syncWithSheet();
+                    }
+                };
+                document.addEventListener('visibilitychange', handleVisibility);
+                return () => document.removeEventListener('visibilitychange', handleVisibility);
+            }, [accessToken, sheetId]);
+
             const joinTrip = async () => {
                 const joiningSheetId = incomingSheetId;
                 setSheetId(joiningSheetId);
