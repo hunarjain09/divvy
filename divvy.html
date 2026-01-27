@@ -57,6 +57,9 @@
     <!-- Loglevel (Lightweight Logging Library) -->
     <script src="https://cdn.jsdelivr.net/npm/loglevel@1.9.1/dist/loglevel.min.js"></script>
 
+    <!-- Google Identity Services (OAuth2) -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
@@ -420,12 +423,34 @@
 
         T.info('app', '🚀 Divvy app initializing...', { sessionId: T.sessionId });
 
+        // --- UUID Helper ---
+        const generateId = () =>
+            typeof crypto.randomUUID === 'function'
+                ? crypto.randomUUID()
+                : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                    const r = Math.random() * 16 | 0;
+                    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                  });
+
+        // --- Google Sheets Config ---
+        const GOOGLE_CLIENT_ID = '852208883738-v7kfe15jsq7pgr89ur1b4lvk4d91jr9b.apps.googleusercontent.com';
+        const GOOGLE_SCOPES = 'openid profile email https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+
         // --- Dexie Database Setup ---
         const db = new Dexie('TripExpenseDB');
         db.version(1).stores({
-            participants: '&name', // Unique name
-            expenses: '++id, date', // Auto-increment ID
-            strangers: '&pair' // Unique pair string "NameA|NameB"
+            participants: '&name',
+            expenses: '++id, date',
+            strangers: '&pair'
+        });
+        db.version(2).stores({
+            participants: '&name',
+            expenses: 'id, date', // UUID primary key (no auto-increment)
+            strangers: '&pair'
+        }).upgrade(tx => {
+            return tx.table('expenses').toCollection().modify(expense => {
+                expense.id = generateId();
+            });
         });
 
         // --- Helpers ---
@@ -551,6 +576,25 @@
             // Reset confirmation modal
             const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+            // Google Sheets Sync State
+            const [googleUser, setGoogleUser] = useState(() => {
+                try { const s = sessionStorage.getItem('divvy_google_user'); return s ? JSON.parse(s) : null; } catch { return null; }
+            });
+            const [accessToken, setAccessToken] = useState(() => {
+                try {
+                    const s = sessionStorage.getItem('divvy_access_token');
+                    if (!s) return null;
+                    const { token, expiresAt } = JSON.parse(s);
+                    return Date.now() < expiresAt ? token : null;
+                } catch { return null; }
+            });
+            const [sheetId, setSheetId] = useState(() => localStorage.getItem('divvy_sheet_id'));
+            const [syncStatus, setSyncStatus] = useState('idle');       // 'idle' | 'syncing' | 'error' | 'success'
+            const [lastSynced, setLastSynced] = useState(null);
+            const [showJoinTripModal, setShowJoinTripModal] = useState(false);
+            const [incomingSheetId, setIncomingSheetId] = useState(null);
+            const tokenClientRef = useRef(null);
+
             // File Input Ref
             const fileInputRef = useRef(null);
 
@@ -645,12 +689,12 @@
                                             onChange={e => setNewParticipant(e.target.value)}
                                             onKeyDown={e => e.key === 'Enter' && addParticipant()}
                                         />
-                                        <button
+                                        {newParticipant.trim() && <button
                                             onClick={addParticipant}
                                             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 bg-white dark:bg-[#2a4032] rounded-md shadow-sm text-primary hover:text-primary-dark transition-colors"
                                         >
                                             <Icon name="add" className="text-[18px]" />
-                                        </button>
+                                        </button>}
                                     </div>
                                     <div className="flex flex-wrap gap-2 max-h-[150px] overflow-y-auto">
                                         {participants.length === 0 ? (
@@ -915,7 +959,7 @@
                                     ) : (
                                         // HISTORY VIEW
                                         <div className="flex flex-col h-full overflow-y-auto">
-                                            {expenses.length === 0 ? (
+                                            {visibleExpenses.length === 0 ? (
                                                 <div className="flex flex-col items-center justify-center py-20 opacity-50 text-slate-400">
                                                     <Icon name="history_toggle_off" className="text-6xl mb-4" />
                                                     <p>No expenses logged yet.</p>
@@ -929,7 +973,7 @@
                                                         <div className="col-span-3 text-right">Payer & Amount</div>
                                                     </div>
                                                     <div className="divide-y divide-[#dce5df] dark:divide-white/5">
-                                                        {expenses.map((exp) => (
+                                                        {visibleExpenses.map((exp) => (
                                                             <div key={exp.id} className="grid grid-cols-12 px-3 sm:px-6 py-3 sm:py-4 items-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                                                                 <div className="col-span-2 flex flex-col">
                                                                     <span className="font-bold text-text-main dark:text-white">{formatDate(exp.date)}</span>
@@ -1363,32 +1407,7 @@
                 const span = T.startSpan('loadDataFromDB', 'database');
                 try {
                     const pCount = await db.participants.count();
-                    const userHasReset = localStorage.getItem('divvy_user_reset') === 'true';
-                    span.log('debug', `Found ${pCount} participants, userHasReset=${userHasReset}`);
-
-                    // Only add demo data if DB is empty AND user hasn't explicitly reset
-                    if (pCount === 0 && !userHasReset) {
-                        span.log('info', 'Loading demo data for first-time user');
-                        // Demo: Beach Weekend Trip with Friends
-                        const defaults = ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'];
-                        await db.participants.bulkAdd(defaults.map(name => ({ name })));
-
-                        // Demo expenses - a realistic beach trip
-                        const demoExpenses = [
-                            { payer: 'Alex', amount: 180, description: 'Airbnb (2 nights)', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Jordan', amount: 65, description: 'Grocery run', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2.5 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Sam', amount: 120, description: 'Surf board rentals', beneficiaries: ['Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Riley', amount: 85, description: 'Seafood dinner', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Alex', amount: 40, description: 'Beach bonfire supplies', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Morgan', amount: 55, description: 'Breakfast & coffee', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 0.5 * 24 * 60 * 60 * 1000) },
-                            { payer: 'Jordan', amount: 30, description: 'Gas money', beneficiaries: ['Alex', 'Jordan', 'Riley'], date: new Date() },
-                        ];
-                        await db.expenses.bulkAdd(demoExpenses);
-
-                        // Demo stranger relationship - Jordan and Morgan met through different friend groups
-                        await db.strangers.add({ pair: 'Jordan|Morgan' });
-                        span.log('info', 'Demo data loaded successfully');
-                    }
+                    span.log('debug', `Found ${pCount} participants`);
 
                     const ps = await db.participants.toArray();
                     const pNames = ps.map(p => p.name);
@@ -1419,13 +1438,490 @@
                 loadDataFromDB();
             }, []);
 
+            // --- Google Auth & Sheets Sync ---
+
+            // Initialize Google Identity Services token client
+            useEffect(() => {
+                const initGIS = () => {
+                    if (typeof google === 'undefined' || !google.accounts) {
+                        // GIS library not loaded yet, retry
+                        setTimeout(initGIS, 500);
+                        return;
+                    }
+                    tokenClientRef.current = google.accounts.oauth2.initTokenClient({
+                        client_id: GOOGLE_CLIENT_ID,
+                        scope: GOOGLE_SCOPES,
+                        callback: async (response) => {
+                            if (response.access_token) {
+                                setAccessToken(response.access_token);
+                                const expiresAt = Date.now() + (response.expires_in || 3600) * 1000;
+                                sessionStorage.setItem('divvy_access_token', JSON.stringify({ token: response.access_token, expiresAt }));
+                                try {
+                                    const userInfo = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                                        headers: { 'Authorization': `Bearer ${response.access_token}` }
+                                    });
+                                    const info = await userInfo.json();
+                                    const user = { name: info.name, email: info.email, picture: info.picture };
+                                    setGoogleUser(user);
+                                    sessionStorage.setItem('divvy_google_user', JSON.stringify(user));
+                                    T.info('auth', 'Google sign-in successful', { email: info.email });
+                                } catch (err) {
+                                    T.error('auth', 'Failed to fetch user info', { error: err.message });
+                                }
+                            }
+                        },
+                    });
+                    T.info('auth', 'Google Identity Services initialized');
+                };
+                initGIS();
+            }, []);
+
+            const googleSignIn = () => {
+                if (tokenClientRef.current) {
+                    tokenClientRef.current.requestAccessToken();
+                }
+            };
+
+            const googleSignOut = () => {
+                if (accessToken) {
+                    google.accounts.oauth2.revoke(accessToken);
+                }
+                setAccessToken(null);
+                setGoogleUser(null);
+                sessionStorage.removeItem('divvy_access_token');
+                sessionStorage.removeItem('divvy_google_user');
+                T.info('auth', 'Google signed out');
+            };
+
+            // --- Google Sheets API Helpers ---
+
+            const sheetsApi = async (path, options = {}) => {
+                const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${path}`, {
+                    ...options,
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                        ...options.headers,
+                    },
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error?.message || `Sheets API error: ${res.status}`);
+                }
+                return res.json();
+            };
+
+            const driveApi = async (path, options = {}) => {
+                const res = await fetch(`https://www.googleapis.com/drive/v3/${path}`, {
+                    ...options,
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                        ...options.headers,
+                    },
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error?.message || `Drive API error: ${res.status}`);
+                }
+                return res.json();
+            };
+
+            const createTripSheet = async () => {
+                T.info('sheets', 'Creating new trip sheet...');
+                const span = T.startSpan('createTripSheet', 'sheets');
+
+                // Create spreadsheet with 3 tabs
+                const sheet = await sheetsApi('', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        properties: { title: `${new Date().toISOString().slice(0, 16).replace('T', ' ')} Divvy Trip Expenses` },
+                        sheets: [
+                            { properties: { title: 'Expenses', index: 0 } },
+                            { properties: { title: 'Participants', index: 1 } },
+                            { properties: { title: 'Strangers', index: 2 } }
+                        ]
+                    })
+                });
+
+                const newSheetId = sheet.spreadsheetId;
+
+                // Write headers to each tab
+                await sheetsApi(`${newSheetId}/values:batchUpdate`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        valueInputOption: 'RAW',
+                        data: [
+                            { range: 'Expenses!A1:H1', values: [['ID', 'Date', 'Description', 'Payer', 'Amount', 'Beneficiaries', 'LastModified', 'Deleted']] },
+                            { range: 'Participants!A1', values: [['Name']] },
+                            { range: 'Strangers!A1', values: [['Pair']] }
+                        ]
+                    })
+                });
+
+                // Make publicly editable (anyone with link can edit)
+                await driveApi(`files/${newSheetId}/permissions`, {
+                    method: 'POST',
+                    body: JSON.stringify({ role: 'writer', type: 'anyone' })
+                });
+
+                setSheetId(newSheetId);
+                localStorage.setItem('divvy_sheet_id', newSheetId);
+
+                span.end({ sheetId: newSheetId });
+                T.info('sheets', 'Trip sheet created', { sheetId: newSheetId });
+                return newSheetId;
+            };
+
+            const disconnectSheet = () => {
+                setSheetId(null);
+                localStorage.removeItem('divvy_sheet_id');
+                setSyncStatus('idle');
+                setLastSynced(null);
+                T.info('sheets', 'Disconnected from sheet');
+            };
+
+            // --- Sync Logic (LWW Timestamp-Based Merge) ---
+
+            const expenseToRow = (e) => [
+                e.id,
+                e.date instanceof Date ? e.date.toISOString() : e.date,
+                e.description,
+                e.payer,
+                e.amount,
+                Array.isArray(e.beneficiaries) ? e.beneficiaries.join(',') : e.beneficiaries,
+                e.lastModified || new Date().toISOString(),
+                e.deleted ? 'true' : 'false'
+            ];
+
+            const rowToExpense = (row) => ({
+                id: row[0],
+                date: new Date(row[1]),
+                description: row[2] || 'Imported',
+                payer: row[3],
+                amount: parseFloat(row[4]),
+                beneficiaries: row[5] ? row[5].split(',') : [],
+                lastModified: row[6] || new Date().toISOString(),
+                deleted: row[7] === 'true'
+            });
+
+            const pushToSheet = async (targetSheetId) => {
+                const sid = targetSheetId || sheetId;
+
+                // Read fresh from DB (not stale React state)
+                const localExpenses = await db.expenses.toArray();
+                const localParticipants = (await db.participants.toArray()).map(p => p.name);
+                const localStrangers = (await db.strangers.toArray()).map(s => s.pair);
+
+                // Read all sheet expenses
+                const sheetExpenseMap = new Map();
+                try {
+                    const data = await sheetsApi(`${sid}/values/Expenses!A:H`);
+                    if (data.values) {
+                        data.values.slice(1).forEach((row, idx) => {
+                            if (row[0]) sheetExpenseMap.set(row[0], { row, rowIndex: idx + 2 }); // +2: 1-indexed + header
+                        });
+                    }
+                } catch (e) {
+                    // Sheet might be empty
+                }
+
+                const toAppend = [];
+                const toUpdate = [];
+
+                for (const exp of localExpenses) {
+                    const sheetEntry = sheetExpenseMap.get(exp.id);
+                    if (!sheetEntry) {
+                        // New expense: append
+                        toAppend.push(expenseToRow(exp));
+                    } else {
+                        // Exists in both: LWW — local wins if newer
+                        const sheetModified = sheetEntry.row[6] || '';
+                        const localModified = exp.lastModified || '';
+                        if (localModified > sheetModified) {
+                            toUpdate.push({ rowIndex: sheetEntry.rowIndex, data: expenseToRow(exp) });
+                        }
+                    }
+                }
+
+                // Append new expenses
+                if (toAppend.length > 0) {
+                    await sheetsApi(`${sid}/values/Expenses!A:H:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+                        method: 'POST',
+                        body: JSON.stringify({ values: toAppend })
+                    });
+                }
+
+                // Update modified expenses (batch update)
+                if (toUpdate.length > 0) {
+                    await sheetsApi(`${sid}/values:batchUpdate`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            valueInputOption: 'RAW',
+                            data: toUpdate.map(u => ({
+                                range: `Expenses!A${u.rowIndex}:H${u.rowIndex}`,
+                                values: [u.data]
+                            }))
+                        })
+                    });
+                }
+
+                // Full replace for participants and strangers (small data sets, union on pull)
+                await sheetsApi(`${sid}/values/Participants!A:A?valueInputOption=RAW`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        values: [['Name'], ...localParticipants.map(p => [p])]
+                    })
+                });
+
+                await sheetsApi(`${sid}/values/Strangers!A:A?valueInputOption=RAW`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        values: [['Pair'], ...localStrangers.map(s => [s])]
+                    })
+                });
+
+                T.info('sync', `Pushed ${toAppend.length} new, ${toUpdate.length} updated expenses to sheet`);
+            };
+
+            const pullFromSheet = async (targetSheetId) => {
+                const sid = targetSheetId || sheetId;
+
+                // Read fresh from DB (not stale React state)
+                const localExpenses = await db.expenses.toArray();
+                const localExpenseMap = new Map(localExpenses.map(e => [e.id, e]));
+
+                // Read all sheet expenses
+                const expData = await sheetsApi(`${sid}/values/Expenses!A:H`);
+                let addedCount = 0;
+                let updatedCount = 0;
+
+                if (expData.values) {
+                    for (const row of expData.values.slice(1)) {
+                        if (!row[0]) continue;
+                        const sheetExp = rowToExpense(row);
+                        const localExp = localExpenseMap.get(sheetExp.id);
+
+                        if (!localExp) {
+                            // New from sheet: add locally
+                            await db.expenses.add(sheetExp);
+                            addedCount++;
+                        } else {
+                            // Exists in both: LWW — sheet wins if newer
+                            const sheetModified = sheetExp.lastModified || '';
+                            const localModified = localExp.lastModified || '';
+                            if (sheetModified > localModified) {
+                                await db.expenses.put(sheetExp);
+                                updatedCount++;
+                            }
+                        }
+                    }
+                }
+
+                // Merge participants (union)
+                const localParticipants = new Set((await db.participants.toArray()).map(p => p.name));
+                const partData = await sheetsApi(`${sid}/values/Participants!A:A`);
+                const newParticipants = [];
+                if (partData.values) {
+                    partData.values.slice(1).forEach(row => {
+                        if (row[0] && !localParticipants.has(row[0])) {
+                            newParticipants.push(row[0]);
+                        }
+                    });
+                }
+                if (newParticipants.length > 0) {
+                    await db.participants.bulkAdd(newParticipants.map(name => ({ name })));
+                }
+
+                // Merge strangers (union)
+                const localStrangers = new Set((await db.strangers.toArray()).map(s => s.pair));
+                const strData = await sheetsApi(`${sid}/values/Strangers!A:A`);
+                const newStrangerPairs = [];
+                if (strData.values) {
+                    strData.values.slice(1).forEach(row => {
+                        if (row[0] && !localStrangers.has(row[0])) {
+                            newStrangerPairs.push(row[0]);
+                        }
+                    });
+                }
+                if (newStrangerPairs.length > 0) {
+                    await db.strangers.bulkAdd(newStrangerPairs.map(pair => ({ pair })));
+                }
+
+                T.info('sync', `Pulled ${addedCount} new, ${updatedCount} updated expenses, ${newParticipants.length} participants, ${newStrangerPairs.length} strangers`);
+
+                // Reload UI from DB
+                await loadDataFromDB();
+            };
+
+            const syncWithSheet = async () => {
+                if (!accessToken || !sheetId) return;
+                setSyncStatus('syncing');
+                const span = T.startSpan('syncWithSheet', 'sync');
+                try {
+                    await pullFromSheet();
+                    await pushToSheet();
+                    setLastSynced(new Date());
+                    setSyncStatus('success');
+                    span.end({ success: true });
+                    // Fade back to idle after 3s
+                    setTimeout(() => setSyncStatus(prev => prev === 'success' ? 'idle' : prev), 3000);
+                } catch (err) {
+                    setSyncStatus('error');
+                    span.error(err);
+                    T.error('sync', 'Sync failed', { error: err.message });
+                    alert('Sync failed: ' + err.message);
+                }
+            };
+
+            // --- Sharing ---
+
+            const shareTrip = async () => {
+                if (!sheetId) return;
+                const shareUrl = `${window.location.origin}${window.location.pathname}#trip=${sheetId}`;
+
+                // Always copy to clipboard
+                try {
+                    await navigator.clipboard.writeText(shareUrl);
+                    T.info('share', 'Trip link copied to clipboard');
+                } catch (err) {
+                    T.warn('share', 'Clipboard copy failed', { error: err.message });
+                }
+
+                if (navigator.share) {
+                    try {
+                        await navigator.share({
+                            title: 'Join my Divvy trip',
+                            text: 'Track and split expenses together',
+                            url: shareUrl
+                        });
+                        T.info('share', 'Trip shared via Web Share API');
+                    } catch (err) {
+                        if (err.name !== 'AbortError') {
+                            T.error('share', 'Share failed', { error: err.message });
+                        }
+                    }
+                } else {
+                    alert('Share link copied to clipboard!');
+                }
+            };
+
+            // Detect #trip=SHEET_ID on app load
+            useEffect(() => {
+                const checkTripHash = () => {
+                    const hash = window.location.hash;
+                    if (hash.startsWith('#trip=')) {
+                        const incoming = hash.slice(6);
+                        window.history.replaceState(null, '', window.location.pathname);
+                        if (incoming && incoming !== sheetId) {
+                            setIncomingSheetId(incoming);
+                            setShowJoinTripModal(true);
+                        } else if (incoming && incoming === sheetId) {
+                            T.info('share', 'Already connected to this trip sheet');
+                        }
+                    }
+                };
+                checkTripHash();
+                window.addEventListener('hashchange', checkTripHash);
+                return () => window.removeEventListener('hashchange', checkTripHash);
+            }, [sheetId]);
+
+            // Auto-sync when app becomes visible or on initial auth
+            useEffect(() => {
+                if (!accessToken || !sheetId) return;
+
+                // Sync once on initial connect (e.g. returning user opens app)
+                syncWithSheet();
+
+                const handleVisibility = () => {
+                    if (document.visibilityState === 'visible') {
+                        T.info('sync', 'App became visible, auto-syncing...');
+                        syncWithSheet();
+                    }
+                };
+                document.addEventListener('visibilitychange', handleVisibility);
+                return () => document.removeEventListener('visibilitychange', handleVisibility);
+            }, [accessToken, sheetId]);
+
+            const joinTrip = async () => {
+                const joiningSheetId = incomingSheetId;
+                const previousSheetId = sheetId;
+                setShowJoinTripModal(false);
+                setIncomingSheetId(null);
+
+                if (accessToken) {
+                    setSyncStatus('syncing');
+                    try {
+                        // Push any unsynced changes to the old sheet before switching
+                        if (previousSheetId) {
+                            T.info('sync', 'Pushing pending changes to previous trip before switching...');
+                            await pushToSheet(previousSheetId);
+                        }
+
+                        // Now switch to the new sheet
+                        setSheetId(joiningSheetId);
+                        localStorage.setItem('divvy_sheet_id', joiningSheetId);
+
+                        // Full replace: clear local data before pulling from new sheet
+                        await db.transaction('rw', db.participants, db.expenses, db.strangers, async () => {
+                            await db.participants.clear();
+                            await db.expenses.clear();
+                            await db.strangers.clear();
+                        });
+                        T.info('sync', 'Cleared local data before joining trip');
+
+                        await pullFromSheet(joiningSheetId);
+                        setLastSynced(new Date());
+                        setSyncStatus('success');
+                        setTimeout(() => setSyncStatus(prev => prev === 'success' ? 'idle' : prev), 3000);
+                    } catch (err) {
+                        setSyncStatus('error');
+                        T.error('sync', 'Failed to join trip', { error: err.message });
+                    }
+                } else {
+                    // Not signed in yet — just save the sheet ID for after auth
+                    setSheetId(joiningSheetId);
+                    localStorage.setItem('divvy_sheet_id', joiningSheetId);
+                }
+            };
+
+            // Auto-create sheet & push on "Create Shared Trip"
+            const createAndShareTrip = async () => {
+                try {
+                    const newId = await createTripSheet();
+                    await pushToSheet(newId);
+                    setLastSynced(new Date());
+                    setSyncStatus('success');
+                    setTimeout(() => setSyncStatus(prev => prev === 'success' ? 'idle' : prev), 3000);
+                } catch (err) {
+                    T.error('sheets', 'Failed to create trip sheet', { error: err.message });
+                    alert('Failed to create shared trip: ' + err.message);
+                }
+            };
+
+            // Sync status helper for display
+            const getSyncLabel = () => {
+                if (syncStatus === 'syncing') return 'Syncing...';
+                if (syncStatus === 'error') return 'Sync failed';
+                if (syncStatus === 'success') return 'Synced!';
+                if (lastSynced) {
+                    const mins = Math.floor((Date.now() - lastSynced.getTime()) / 60000);
+                    if (mins < 1) return 'Synced just now';
+                    return `Synced ${mins}m ago`;
+                }
+                return 'Sync';
+            };
+
+            // Filter out soft-deleted expenses for UI
+            const visibleExpenses = useMemo(() => expenses.filter(e => !e.deleted), [expenses]);
+
             // Logic: Balance Calculation (includes ALL people from expenses, not just active participants)
             const getBalanceMap = useMemo(() => {
                 const balances = new Map();
                 // Initialize active participants with 0
                 participants.forEach(p => balances.set(p, 0));
-                // Process all expenses - this will add removed participants if they have transactions
-                expenses.forEach(exp => {
+                // Process only visible (non-deleted) expenses
+                visibleExpenses.forEach(exp => {
                     const val = parseFloat(exp.amount);
                     if (isNaN(val)) return;
                     // Credit the payer (even if removed)
@@ -1437,12 +1933,12 @@
                     });
                 });
                 return balances;
-            }, [expenses, participants]);
+            }, [visibleExpenses, participants]);
 
             // Set of active participants (for UI selections)
             const activeParticipantSet = useMemo(() => new Set(participants), [participants]);
 
-            const totalSpent = useMemo(() => expenses.reduce((a, c) => a + c.amount, 0), [expenses]);
+            const totalSpent = useMemo(() => visibleExpenses.reduce((a, c) => a + c.amount, 0), [visibleExpenses]);
 
             // Formatters (must be defined before useMemo hooks that use them)
             const formatMoney = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
@@ -1638,6 +2134,7 @@
                     db.close();
                     await Dexie.delete('TripExpenseDB');
                     localStorage.setItem('divvy_user_reset', 'true');
+                    localStorage.removeItem('divvy_sheet_id');
                     span.end({ success: true });
                     T.info('app', '🗑️ Trip data reset, reloading page...');
                     window.location.reload();
@@ -1655,14 +2152,15 @@
                     const defaults = ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'];
                     await db.participants.bulkAdd(defaults.map(name => ({ name })));
 
+                    const now = new Date().toISOString();
                     const demoExpenses = [
-                        { payer: 'Alex', amount: 180, description: 'Airbnb (2 nights)', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
-                        { payer: 'Jordan', amount: 65, description: 'Grocery run', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2.5 * 24 * 60 * 60 * 1000) },
-                        { payer: 'Sam', amount: 120, description: 'Surf board rentals', beneficiaries: ['Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) },
-                        { payer: 'Riley', amount: 85, description: 'Seafood dinner', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000) },
-                        { payer: 'Alex', amount: 40, description: 'Beach bonfire supplies', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) },
-                        { payer: 'Morgan', amount: 55, description: 'Breakfast & coffee', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 0.5 * 24 * 60 * 60 * 1000) },
-                        { payer: 'Jordan', amount: 30, description: 'Gas money', beneficiaries: ['Alex', 'Jordan', 'Riley'], date: new Date() },
+                        { id: generateId(), payer: 'Alex', amount: 180, description: 'Airbnb (2 nights)', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Jordan', amount: 65, description: 'Grocery run', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2.5 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Sam', amount: 120, description: 'Surf board rentals', beneficiaries: ['Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Riley', amount: 85, description: 'Seafood dinner', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Alex', amount: 40, description: 'Beach bonfire supplies', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Morgan', amount: 55, description: 'Breakfast & coffee', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 0.5 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Jordan', amount: 30, description: 'Gas money', beneficiaries: ['Alex', 'Jordan', 'Riley'], date: new Date(), lastModified: now, deleted: false },
                     ];
                     await db.expenses.bulkAdd(demoExpenses);
                     await db.strangers.add({ pair: 'Jordan|Morgan' });
@@ -1689,20 +2187,23 @@
                 const span = T.startSpan('submitExpense', 'expense');
 
                 const newExpense = {
+                    id: generateId(),
                     payer,
                     amount: val,
                     description: description || 'Untitled',
                     beneficiaries: Array.from(selectedBeneficiaries),
-                    date: new Date()
+                    date: new Date(),
+                    lastModified: new Date().toISOString(),
+                    deleted: false
                 };
 
                 try {
-                    const id = await db.expenses.add(newExpense);
-                    setExpenses(prev => [{ ...newExpense, id }, ...prev]);
+                    await db.expenses.add(newExpense);
+                    setExpenses(prev => [newExpense, ...prev]);
                     setAmount('');
                     setDescription('');
                     setViewMode('history');
-                    span.end({ id, amount: val, payer, beneficiaries: newExpense.beneficiaries.length });
+                    span.end({ id: newExpense.id, amount: val, payer, beneficiaries: newExpense.beneficiaries.length });
                     T.info('expense', `💰 New expense: ${formatMoney(val)} by ${payer}`, { description: newExpense.description });
                 } catch (err) {
                     span.error(err);
@@ -1721,7 +2222,7 @@
                 let tsv = "EXPENSE HISTORY\n";
                 tsv += "Date\tDescription\tPayer\tAmount\tBeneficiaries\tISO_Timestamp\tID\n";
 
-                expenses.forEach(exp => {
+                visibleExpenses.forEach(exp => {
                     const dateStr = `${formatDate(exp.date)} ${formatTime(exp.date)}`;
                     const cleanDesc = exp.description.replace(/[\t\n]/g, " ");
                     const benStr = exp.beneficiaries.join(", ");
@@ -1812,6 +2313,7 @@
                                 const beneficiaries = cols[4] ? cols[4].split(', ') : [];
 
                                 newExpenses.push({
+                                    id: cols[6] || generateId(),
                                     date,
                                     description: cols[1] || 'Imported Expense',
                                     payer: cols[2],
@@ -1878,6 +2380,46 @@
             return (
                 <>
                     {/* Reset Confirmation Modal */}
+                    {/* Join Trip Modal */}
+                    {showJoinTripModal && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                            <div className="bg-white dark:bg-[#1a2e22] rounded-2xl p-6 max-w-md mx-4 shadow-2xl border border-slate-200 dark:border-white/10">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="p-3 bg-primary/10 dark:bg-primary/20 rounded-full">
+                                        <Icon name="group_add" className="text-primary text-2xl" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-bold text-text-main dark:text-white">Join a Shared Trip</h3>
+                                        <p className="text-sm text-slate-500">Someone shared a trip with you</p>
+                                    </div>
+                                </div>
+                                <p className="text-slate-600 dark:text-slate-300 mb-4">
+                                    Connect to this shared Google Sheet to sync expenses with your group. {!googleUser && 'You\'ll need to sign in with Google first.'}
+                                </p>
+                                {sheetId && (
+                                    <p className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg mb-4">
+                                        You're currently connected to a different trip. Joining this one will replace your connection.
+                                    </p>
+                                )}
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => { setShowJoinTripModal(false); setIncomingSheetId(null); }}
+                                        className="flex-1 py-3 px-4 bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 text-slate-700 dark:text-slate-300 font-bold rounded-xl transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => { if (!googleUser) { googleSignIn(); } joinTrip(); }}
+                                        className="flex-1 py-3 px-4 bg-primary hover:bg-primary-dark text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Icon name="link" className="text-[18px]" />
+                                        Connect
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {showResetConfirm && (
                         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
                             <div className="bg-white dark:bg-[#1a2e22] rounded-2xl p-6 max-w-md mx-4 shadow-2xl border border-slate-200 dark:border-white/10">
@@ -1955,6 +2497,11 @@
                                         description="All data stored locally in your browser, no account needed"
                                     />
                                     <BenefitItem
+                                        icon="sync"
+                                        title="Live Collaboration"
+                                        description="Sync expenses with friends in real-time via Google Sheets"
+                                    />
+                                    <BenefitItem
                                         icon="download"
                                         title="Backup & Restore"
                                         description="Download TSV backups and restore anytime"
@@ -1988,6 +2535,69 @@
                                 <span className="text-xs uppercase tracking-wider font-bold text-slate-400">Total Spent</span>
                                 <span className="text-2xl font-bold text-[#111814] dark:text-white">{formatMoney(totalSpent)}</span>
                             </div>
+
+                            {/* Google Sheets Sync Buttons */}
+                            {!googleUser ? (
+                                <button
+                                    onClick={googleSignIn}
+                                    className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-white dark:bg-white/10 hover:bg-slate-50 dark:hover:bg-white/20 border border-slate-200 dark:border-white/20 rounded-lg transition-colors text-sm font-medium text-slate-600 dark:text-slate-300"
+                                    title="Sign in with Google to sync & share"
+                                >
+                                    <Icon name="cloud_off" className="text-[18px]" />
+                                    <span className="hidden sm:inline">Sign In</span>
+                                </button>
+                            ) : (
+                                <>
+                                    {!sheetId ? (
+                                        <button
+                                            onClick={createAndShareTrip}
+                                            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-primary/10 hover:bg-primary/20 border border-primary/30 rounded-lg transition-colors text-sm font-medium text-primary-dark dark:text-primary"
+                                            title="Create a Google Sheet to share this trip"
+                                        >
+                                            <Icon name="add_link" className="text-[18px]" />
+                                            <span className="hidden sm:inline">Share Trip</span>
+                                        </button>
+                                    ) : (
+                                        <>
+                                            <button
+                                                onClick={syncWithSheet}
+                                                disabled={syncStatus === 'syncing'}
+                                                className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg transition-colors text-sm font-medium border ${
+                                                    syncStatus === 'error'
+                                                        ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400'
+                                                        : syncStatus === 'success'
+                                                        ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-600 dark:text-green-400'
+                                                        : 'bg-white dark:bg-white/10 border-slate-200 dark:border-white/20 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/20'
+                                                }`}
+                                                title={getSyncLabel()}
+                                            >
+                                                <Icon name={syncStatus === 'syncing' ? 'sync' : syncStatus === 'error' ? 'sync_problem' : syncStatus === 'success' ? 'cloud_done' : 'cloud_sync'} className={`text-[18px] ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                                                <span className="hidden sm:inline">{getSyncLabel()}</span>
+                                            </button>
+                                            <button
+                                                onClick={shareTrip}
+                                                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-primary/10 hover:bg-primary/20 border border-primary/30 rounded-lg transition-colors text-sm font-medium text-primary-dark dark:text-primary"
+                                                title="Share trip link with friends"
+                                            >
+                                                <Icon name="share" className="text-[18px]" />
+                                                <span className="hidden sm:inline">Share</span>
+                                            </button>
+                                        </>
+                                    )}
+                                    <button
+                                        onClick={googleSignOut}
+                                        className="flex items-center justify-center size-8 rounded-full overflow-hidden border-2 border-primary/30 hover:border-primary transition-colors"
+                                        title={`${googleUser.email} — Click to sign out`}
+                                    >
+                                        {googleUser.picture ? (
+                                            <img src={googleUser.picture} alt="" className="size-full object-cover" referrerPolicy="no-referrer" />
+                                        ) : (
+                                            <span className="text-xs font-bold text-primary-dark dark:text-primary">{googleUser.name?.[0] || '?'}</span>
+                                        )}
+                                    </button>
+                                </>
+                            )}
+
                             <button
                                 onClick={() => setShowResetConfirm(true)}
                                 className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-slate-100 dark:bg-white/10 hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 rounded-lg transition-colors text-sm font-medium"
