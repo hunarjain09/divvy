@@ -1,0 +1,129 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Jest tests with coverage
+        run: npm test -- --coverage
+        continue-on-error: false
+
+      - name: Comment coverage on PR
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let coverageComment = '## 📊 Test Results\n\n';
+
+            try {
+              const coverage = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json', 'utf8'));
+              const total = coverage.total;
+
+              coverageComment += '| Metric | Coverage |\n';
+              coverageComment += '|--------|----------|\n';
+              coverageComment += `| Lines | ${total.lines.pct}% |\n`;
+              coverageComment += `| Statements | ${total.statements.pct}% |\n`;
+              coverageComment += `| Functions | ${total.functions.pct}% |\n`;
+              coverageComment += `| Branches | ${total.branches.pct}% |\n`;
+
+              if (total.lines.pct < 80) {
+                coverageComment += '\n⚠️ Coverage is below 80%';
+              } else {
+                coverageComment += '\n✅ Coverage looks good!';
+              }
+            } catch (error) {
+              coverageComment += '❌ Tests failed or coverage report not generated.\n';
+            }
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes('📊 Test Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: coverageComment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: coverageComment
+              });
+            }
+
+  build:
+    name: Build Production Bundle
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build for production
+        run: npm run build
+
+      - name: Check build output
+        run: |
+          if [ ! -f "dist/index.html" ]; then
+            echo "❌ Build failed: dist/index.html not found"
+            exit 1
+          fi
+          if [ ! -f "dist/app.js" ]; then
+            echo "❌ Build failed: dist/app.js not found"
+            exit 1
+          fi
+          if [ ! -f "dist/styles.css" ]; then
+            echo "❌ Build failed: dist/styles.css not found"
+            exit 1
+          fi
+          echo "✅ All required build artifacts present"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+          retention-days: 7
