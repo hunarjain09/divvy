@@ -1774,15 +1774,24 @@
             }, []);
 
             const joinTrip = async () => {
-                setSheetId(incomingSheetId);
-                localStorage.setItem('divvy_sheet_id', incomingSheetId);
+                const joiningSheetId = incomingSheetId;
+                setSheetId(joiningSheetId);
+                localStorage.setItem('divvy_sheet_id', joiningSheetId);
                 setShowJoinTripModal(false);
                 setIncomingSheetId(null);
 
                 if (accessToken) {
                     setSyncStatus('syncing');
                     try {
-                        await pullFromSheet(incomingSheetId);
+                        // Full replace: clear local data before pulling from sheet
+                        await db.transaction('rw', db.participants, db.expenses, db.strangers, async () => {
+                            await db.participants.clear();
+                            await db.expenses.clear();
+                            await db.strangers.clear();
+                        });
+                        T.info('sync', 'Cleared local data before joining trip');
+
+                        await pullFromSheet(joiningSheetId);
                         setLastSynced(new Date());
                         setSyncStatus('success');
                         setTimeout(() => setSyncStatus(prev => prev === 'success' ? 'idle' : prev), 3000);
