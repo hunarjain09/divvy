@@ -1765,6 +1765,14 @@
                 if (!sheetId) return;
                 const shareUrl = `${window.location.origin}${window.location.pathname}#trip=${sheetId}`;
 
+                // Always copy to clipboard
+                try {
+                    await navigator.clipboard.writeText(shareUrl);
+                    T.info('share', 'Trip link copied to clipboard');
+                } catch (err) {
+                    T.warn('share', 'Clipboard copy failed', { error: err.message });
+                }
+
                 if (navigator.share) {
                     try {
                         await navigator.share({
@@ -1779,14 +1787,7 @@
                         }
                     }
                 } else {
-                    try {
-                        await navigator.clipboard.writeText(shareUrl);
-                        alert('Share link copied to clipboard!');
-                        T.info('share', 'Trip link copied to clipboard');
-                    } catch (err) {
-                        // Fallback: show URL in prompt
-                        prompt('Copy this link to share:', shareUrl);
-                    }
+                    alert('Share link copied to clipboard!');
                 }
             };
 
