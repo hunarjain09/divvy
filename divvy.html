@@ -950,7 +950,7 @@
                                     ) : (
                                         // HISTORY VIEW
                                         <div className="flex flex-col h-full overflow-y-auto">
-                                            {expenses.length === 0 ? (
+                                            {visibleExpenses.length === 0 ? (
                                                 <div className="flex flex-col items-center justify-center py-20 opacity-50 text-slate-400">
                                                     <Icon name="history_toggle_off" className="text-6xl mb-4" />
                                                     <p>No expenses logged yet.</p>
@@ -964,7 +964,7 @@
                                                         <div className="col-span-3 text-right">Payer & Amount</div>
                                                     </div>
                                                     <div className="divide-y divide-[#dce5df] dark:divide-white/5">
-                                                        {expenses.map((exp) => (
+                                                        {visibleExpenses.map((exp) => (
                                                             <div key={exp.id} className="grid grid-cols-12 px-3 sm:px-6 py-3 sm:py-4 items-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                                                                 <div className="col-span-2 flex flex-col">
                                                                     <span className="font-bold text-text-main dark:text-white">{formatDate(exp.date)}</span>
@@ -1537,7 +1537,7 @@
                     body: JSON.stringify({
                         valueInputOption: 'RAW',
                         data: [
-                            { range: 'Expenses!A1:F1', values: [['ID', 'Date', 'Description', 'Payer', 'Amount', 'Beneficiaries']] },
+                            { range: 'Expenses!A1:H1', values: [['ID', 'Date', 'Description', 'Payer', 'Amount', 'Beneficiaries', 'LastModified', 'Deleted']] },
                             { range: 'Participants!A1', values: [['Name']] },
                             { range: 'Strangers!A1', values: [['Pair']] }
                         ]
@@ -1566,93 +1566,150 @@
                 T.info('sheets', 'Disconnected from sheet');
             };
 
-            // --- Sync Logic (Append-Only Merge) ---
+            // --- Sync Logic (LWW Timestamp-Based Merge) ---
+
+            const expenseToRow = (e) => [
+                e.id,
+                e.date instanceof Date ? e.date.toISOString() : e.date,
+                e.description,
+                e.payer,
+                e.amount,
+                Array.isArray(e.beneficiaries) ? e.beneficiaries.join(',') : e.beneficiaries,
+                e.lastModified || new Date().toISOString(),
+                e.deleted ? 'true' : 'false'
+            ];
+
+            const rowToExpense = (row) => ({
+                id: row[0],
+                date: new Date(row[1]),
+                description: row[2] || 'Imported',
+                payer: row[3],
+                amount: parseFloat(row[4]),
+                beneficiaries: row[5] ? row[5].split(',') : [],
+                lastModified: row[6] || new Date().toISOString(),
+                deleted: row[7] === 'true'
+            });
 
             const pushToSheet = async (targetSheetId) => {
                 const sid = targetSheetId || sheetId;
 
-                // Read existing expense IDs from sheet
-                let sheetExpenseIds = new Set();
+                // Read fresh from DB (not stale React state)
+                const localExpenses = await db.expenses.toArray();
+                const localParticipants = (await db.participants.toArray()).map(p => p.name);
+                const localStrangers = (await db.strangers.toArray()).map(s => s.pair);
+
+                // Read all sheet expenses
+                const sheetExpenseMap = new Map();
                 try {
-                    const data = await sheetsApi(`${sid}/values/Expenses!A:A`);
+                    const data = await sheetsApi(`${sid}/values/Expenses!A:H`);
                     if (data.values) {
-                        data.values.slice(1).forEach(row => { if (row[0]) sheetExpenseIds.add(row[0]); });
+                        data.values.slice(1).forEach((row, idx) => {
+                            if (row[0]) sheetExpenseMap.set(row[0], { row, rowIndex: idx + 2 }); // +2: 1-indexed + header
+                        });
                     }
                 } catch (e) {
-                    // Sheet might be empty, that's OK
+                    // Sheet might be empty
                 }
 
-                // Find local expenses not yet in sheet
-                const newExpenses = expenses.filter(e => !sheetExpenseIds.has(e.id));
+                const toAppend = [];
+                const toUpdate = [];
 
-                if (newExpenses.length > 0) {
-                    await sheetsApi(`${sid}/values/Expenses!A:F:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+                for (const exp of localExpenses) {
+                    const sheetEntry = sheetExpenseMap.get(exp.id);
+                    if (!sheetEntry) {
+                        // New expense: append
+                        toAppend.push(expenseToRow(exp));
+                    } else {
+                        // Exists in both: LWW — local wins if newer
+                        const sheetModified = sheetEntry.row[6] || '';
+                        const localModified = exp.lastModified || '';
+                        if (localModified > sheetModified) {
+                            toUpdate.push({ rowIndex: sheetEntry.rowIndex, data: expenseToRow(exp) });
+                        }
+                    }
+                }
+
+                // Append new expenses
+                if (toAppend.length > 0) {
+                    await sheetsApi(`${sid}/values/Expenses!A:H:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+                        method: 'POST',
+                        body: JSON.stringify({ values: toAppend })
+                    });
+                }
+
+                // Update modified expenses (batch update)
+                if (toUpdate.length > 0) {
+                    await sheetsApi(`${sid}/values:batchUpdate`, {
                         method: 'POST',
                         body: JSON.stringify({
-                            values: newExpenses.map(e => [
-                                e.id,
-                                e.date.toISOString(),
-                                e.description,
-                                e.payer,
-                                e.amount,
-                                e.beneficiaries.join(',')
-                            ])
+                            valueInputOption: 'RAW',
+                            data: toUpdate.map(u => ({
+                                range: `Expenses!A${u.rowIndex}:H${u.rowIndex}`,
+                                values: [u.data]
+                            }))
                         })
                     });
                 }
 
-                // Full replace for participants and strangers (small data sets)
+                // Full replace for participants and strangers (small data sets, union on pull)
                 await sheetsApi(`${sid}/values/Participants!A:A?valueInputOption=RAW`, {
                     method: 'PUT',
                     body: JSON.stringify({
-                        values: [['Name'], ...participants.map(p => [p])]
+                        values: [['Name'], ...localParticipants.map(p => [p])]
                     })
                 });
 
                 await sheetsApi(`${sid}/values/Strangers!A:A?valueInputOption=RAW`, {
                     method: 'PUT',
                     body: JSON.stringify({
-                        values: [['Pair'], ...Array.from(strangers).map(s => [s])]
+                        values: [['Pair'], ...localStrangers.map(s => [s])]
                     })
                 });
 
-                T.info('sync', `Pushed ${newExpenses.length} new expenses to sheet`);
+                T.info('sync', `Pushed ${toAppend.length} new, ${toUpdate.length} updated expenses to sheet`);
             };
 
             const pullFromSheet = async (targetSheetId) => {
                 const sid = targetSheetId || sheetId;
 
-                // Read expenses from sheet
-                const expData = await sheetsApi(`${sid}/values/Expenses!A:F`);
-                const localIds = new Set(expenses.map(e => e.id));
-                const newFromSheet = [];
+                // Read fresh from DB (not stale React state)
+                const localExpenses = await db.expenses.toArray();
+                const localExpenseMap = new Map(localExpenses.map(e => [e.id, e]));
+
+                // Read all sheet expenses
+                const expData = await sheetsApi(`${sid}/values/Expenses!A:H`);
+                let addedCount = 0;
+                let updatedCount = 0;
 
                 if (expData.values) {
-                    expData.values.slice(1).forEach(row => {
-                        if (row[0] && !localIds.has(row[0])) {
-                            newFromSheet.push({
-                                id: row[0],
-                                date: new Date(row[1]),
-                                description: row[2] || 'Imported',
-                                payer: row[3],
-                                amount: parseFloat(row[4]),
-                                beneficiaries: row[5] ? row[5].split(',') : []
-                            });
-                        }
-                    });
-                }
+                    for (const row of expData.values.slice(1)) {
+                        if (!row[0]) continue;
+                        const sheetExp = rowToExpense(row);
+                        const localExp = localExpenseMap.get(sheetExp.id);
 
-                if (newFromSheet.length > 0) {
-                    await db.expenses.bulkAdd(newFromSheet);
+                        if (!localExp) {
+                            // New from sheet: add locally
+                            await db.expenses.add(sheetExp);
+                            addedCount++;
+                        } else {
+                            // Exists in both: LWW — sheet wins if newer
+                            const sheetModified = sheetExp.lastModified || '';
+                            const localModified = localExp.lastModified || '';
+                            if (sheetModified > localModified) {
+                                await db.expenses.put(sheetExp);
+                                updatedCount++;
+                            }
+                        }
+                    }
                 }
 
                 // Merge participants (union)
+                const localParticipants = new Set((await db.participants.toArray()).map(p => p.name));
                 const partData = await sheetsApi(`${sid}/values/Participants!A:A`);
-                const localParticipantSet = new Set(participants);
                 const newParticipants = [];
                 if (partData.values) {
                     partData.values.slice(1).forEach(row => {
-                        if (row[0] && !localParticipantSet.has(row[0])) {
+                        if (row[0] && !localParticipants.has(row[0])) {
                             newParticipants.push(row[0]);
                         }
                     });
@@ -1662,11 +1719,12 @@
                 }
 
                 // Merge strangers (union)
+                const localStrangers = new Set((await db.strangers.toArray()).map(s => s.pair));
                 const strData = await sheetsApi(`${sid}/values/Strangers!A:A`);
                 const newStrangerPairs = [];
                 if (strData.values) {
                     strData.values.slice(1).forEach(row => {
-                        if (row[0] && !strangers.has(row[0])) {
+                        if (row[0] && !localStrangers.has(row[0])) {
                             newStrangerPairs.push(row[0]);
                         }
                     });
@@ -1675,9 +1733,9 @@
                     await db.strangers.bulkAdd(newStrangerPairs.map(pair => ({ pair })));
                 }
 
-                T.info('sync', `Pulled ${newFromSheet.length} expenses, ${newParticipants.length} participants, ${newStrangerPairs.length} strangers from sheet`);
+                T.info('sync', `Pulled ${addedCount} new, ${updatedCount} updated expenses, ${newParticipants.length} participants, ${newStrangerPairs.length} strangers`);
 
-                // Reload UI
+                // Reload UI from DB
                 await loadDataFromDB();
             };
 
@@ -1804,13 +1862,16 @@
                 return 'Sync';
             };
 
+            // Filter out soft-deleted expenses for UI
+            const visibleExpenses = useMemo(() => expenses.filter(e => !e.deleted), [expenses]);
+
             // Logic: Balance Calculation (includes ALL people from expenses, not just active participants)
             const getBalanceMap = useMemo(() => {
                 const balances = new Map();
                 // Initialize active participants with 0
                 participants.forEach(p => balances.set(p, 0));
-                // Process all expenses - this will add removed participants if they have transactions
-                expenses.forEach(exp => {
+                // Process only visible (non-deleted) expenses
+                visibleExpenses.forEach(exp => {
                     const val = parseFloat(exp.amount);
                     if (isNaN(val)) return;
                     // Credit the payer (even if removed)
@@ -1822,12 +1883,12 @@
                     });
                 });
                 return balances;
-            }, [expenses, participants]);
+            }, [visibleExpenses, participants]);
 
             // Set of active participants (for UI selections)
             const activeParticipantSet = useMemo(() => new Set(participants), [participants]);
 
-            const totalSpent = useMemo(() => expenses.reduce((a, c) => a + c.amount, 0), [expenses]);
+            const totalSpent = useMemo(() => visibleExpenses.reduce((a, c) => a + c.amount, 0), [visibleExpenses]);
 
             // Formatters (must be defined before useMemo hooks that use them)
             const formatMoney = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
@@ -2041,14 +2102,15 @@
                     const defaults = ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'];
                     await db.participants.bulkAdd(defaults.map(name => ({ name })));
 
+                    const now = new Date().toISOString();
                     const demoExpenses = [
-                        { id: generateId(), payer: 'Alex', amount: 180, description: 'Airbnb (2 nights)', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
-                        { id: generateId(), payer: 'Jordan', amount: 65, description: 'Grocery run', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2.5 * 24 * 60 * 60 * 1000) },
-                        { id: generateId(), payer: 'Sam', amount: 120, description: 'Surf board rentals', beneficiaries: ['Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) },
-                        { id: generateId(), payer: 'Riley', amount: 85, description: 'Seafood dinner', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000) },
-                        { id: generateId(), payer: 'Alex', amount: 40, description: 'Beach bonfire supplies', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) },
-                        { id: generateId(), payer: 'Morgan', amount: 55, description: 'Breakfast & coffee', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 0.5 * 24 * 60 * 60 * 1000) },
-                        { id: generateId(), payer: 'Jordan', amount: 30, description: 'Gas money', beneficiaries: ['Alex', 'Jordan', 'Riley'], date: new Date() },
+                        { id: generateId(), payer: 'Alex', amount: 180, description: 'Airbnb (2 nights)', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Jordan', amount: 65, description: 'Grocery run', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2.5 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Sam', amount: 120, description: 'Surf board rentals', beneficiaries: ['Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Riley', amount: 85, description: 'Seafood dinner', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1.5 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Alex', amount: 40, description: 'Beach bonfire supplies', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Morgan', amount: 55, description: 'Breakfast & coffee', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 0.5 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
+                        { id: generateId(), payer: 'Jordan', amount: 30, description: 'Gas money', beneficiaries: ['Alex', 'Jordan', 'Riley'], date: new Date(), lastModified: now, deleted: false },
                     ];
                     await db.expenses.bulkAdd(demoExpenses);
                     await db.strangers.add({ pair: 'Jordan|Morgan' });
@@ -2080,7 +2142,9 @@
                     amount: val,
                     description: description || 'Untitled',
                     beneficiaries: Array.from(selectedBeneficiaries),
-                    date: new Date()
+                    date: new Date(),
+                    lastModified: new Date().toISOString(),
+                    deleted: false
                 };
 
                 try {
@@ -2108,7 +2172,7 @@
                 let tsv = "EXPENSE HISTORY\n";
                 tsv += "Date\tDescription\tPayer\tAmount\tBeneficiaries\tISO_Timestamp\tID\n";
 
-                expenses.forEach(exp => {
+                visibleExpenses.forEach(exp => {
                     const dateStr = `${formatDate(exp.date)} ${formatTime(exp.date)}`;
                     const cleanDesc = exp.description.replace(/[\t\n]/g, " ");
                     const benStr = exp.beneficiaries.join(", ");
