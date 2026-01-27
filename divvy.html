@@ -1829,15 +1829,24 @@
 
             const joinTrip = async () => {
                 const joiningSheetId = incomingSheetId;
-                setSheetId(joiningSheetId);
-                localStorage.setItem('divvy_sheet_id', joiningSheetId);
+                const previousSheetId = sheetId;
                 setShowJoinTripModal(false);
                 setIncomingSheetId(null);
 
                 if (accessToken) {
                     setSyncStatus('syncing');
                     try {
-                        // Full replace: clear local data before pulling from sheet
+                        // Push any unsynced changes to the old sheet before switching
+                        if (previousSheetId) {
+                            T.info('sync', 'Pushing pending changes to previous trip before switching...');
+                            await pushToSheet(previousSheetId);
+                        }
+
+                        // Now switch to the new sheet
+                        setSheetId(joiningSheetId);
+                        localStorage.setItem('divvy_sheet_id', joiningSheetId);
+
+                        // Full replace: clear local data before pulling from new sheet
                         await db.transaction('rw', db.participants, db.expenses, db.strangers, async () => {
                             await db.participants.clear();
                             await db.expenses.clear();
@@ -1851,8 +1860,12 @@
                         setTimeout(() => setSyncStatus(prev => prev === 'success' ? 'idle' : prev), 3000);
                     } catch (err) {
                         setSyncStatus('error');
-                        T.error('sync', 'Failed to pull after joining trip', { error: err.message });
+                        T.error('sync', 'Failed to join trip', { error: err.message });
                     }
+                } else {
+                    // Not signed in yet — just save the sheet ID for after auth
+                    setSheetId(joiningSheetId);
+                    localStorage.setItem('divvy_sheet_id', joiningSheetId);
                 }
             };
 
