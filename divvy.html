@@ -453,6 +453,15 @@
             });
         });
 
+        // --- Playground Database (sandboxed, separate from real data) ---
+        const playgroundDb = new Dexie('TripExpenseDB_Playground');
+        playgroundDb.version(1).stores({
+            participants: '&name',
+            expenses: 'id, date',
+            strangers: '&pair'
+        });
+        let activeDb = db;
+
         // --- Helpers ---
         const AVATAR_COLORS = [
             { bg: 'bg-indigo-100', text: 'text-indigo-600' },
@@ -575,6 +584,9 @@
 
             // Reset confirmation modal
             const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+            // Playground mode (sandboxed demo environment)
+            const [playgroundMode, setPlaygroundMode] = useState(false);
 
             // Google Sheets Sync State
             const [googleUser, setGoogleUser] = useState(() => {
@@ -701,10 +713,11 @@
                                             <div className="w-full text-center py-4">
                                                 <p className="text-sm text-slate-400 mb-3">No participants yet</p>
                                                 <button
-                                                    onClick={loadDemoData}
-                                                    className="text-xs font-medium text-primary hover:text-primary-dark bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors"
+                                                    onClick={enterPlayground}
+                                                    className="text-xs font-medium text-primary hover:text-primary-dark bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 mx-auto"
                                                 >
-                                                    Load Demo Trip
+                                                    <Icon name="science" className="text-[14px]" />
+                                                    Try Playground Mode
                                                 </button>
                                             </div>
                                         ) : participants.map(p => {
@@ -1406,10 +1419,10 @@
             const loadDataFromDB = async () => {
                 const span = T.startSpan('loadDataFromDB', 'database');
                 try {
-                    const pCount = await db.participants.count();
+                    const pCount = await activeDb.participants.count();
                     span.log('debug', `Found ${pCount} participants`);
 
-                    const ps = await db.participants.toArray();
+                    const ps = await activeDb.participants.toArray();
                     const pNames = ps.map(p => p.name);
                     setParticipants(pNames);
                     span.log('debug', `Loaded ${pNames.length} participants`, pNames);
@@ -1417,11 +1430,11 @@
                     if (!payer && pNames.length > 0) setPayer(pNames[0]);
                     setSelectedBeneficiaries(new Set(pNames));
 
-                    const exps = await db.expenses.toArray();
+                    const exps = await activeDb.expenses.toArray();
                     setExpenses(exps.sort((a, b) => b.date - a.date));
                     span.log('debug', `Loaded ${exps.length} expenses`);
 
-                    const strs = await db.strangers.toArray();
+                    const strs = await activeDb.strangers.toArray();
                     setStrangers(new Set(strs.map(s => s.pair)));
                     span.log('debug', `Loaded ${strs.length} stranger relationships`);
 
@@ -1609,9 +1622,9 @@
                 const sid = targetSheetId || sheetId;
 
                 // Read fresh from DB (not stale React state)
-                const localExpenses = await db.expenses.toArray();
-                const localParticipants = (await db.participants.toArray()).map(p => p.name);
-                const localStrangers = (await db.strangers.toArray()).map(s => s.pair);
+                const localExpenses = await activeDb.expenses.toArray();
+                const localParticipants = (await activeDb.participants.toArray()).map(p => p.name);
+                const localStrangers = (await activeDb.strangers.toArray()).map(s => s.pair);
 
                 // Read all sheet expenses
                 const sheetExpenseMap = new Map();
@@ -1688,7 +1701,7 @@
                 const sid = targetSheetId || sheetId;
 
                 // Read fresh from DB (not stale React state)
-                const localExpenses = await db.expenses.toArray();
+                const localExpenses = await activeDb.expenses.toArray();
                 const localExpenseMap = new Map(localExpenses.map(e => [e.id, e]));
 
                 // Read all sheet expenses
@@ -1704,14 +1717,14 @@
 
                         if (!localExp) {
                             // New from sheet: add locally
-                            await db.expenses.add(sheetExp);
+                            await activeDb.expenses.add(sheetExp);
                             addedCount++;
                         } else {
                             // Exists in both: LWW — sheet wins if newer
                             const sheetModified = sheetExp.lastModified || '';
                             const localModified = localExp.lastModified || '';
                             if (sheetModified > localModified) {
-                                await db.expenses.put(sheetExp);
+                                await activeDb.expenses.put(sheetExp);
                                 updatedCount++;
                             }
                         }
@@ -1719,7 +1732,7 @@
                 }
 
                 // Merge participants (union)
-                const localParticipants = new Set((await db.participants.toArray()).map(p => p.name));
+                const localParticipants = new Set((await activeDb.participants.toArray()).map(p => p.name));
                 const partData = await sheetsApi(`${sid}/values/Participants!A:A`);
                 const newParticipants = [];
                 if (partData.values) {
@@ -1730,11 +1743,11 @@
                     });
                 }
                 if (newParticipants.length > 0) {
-                    await db.participants.bulkAdd(newParticipants.map(name => ({ name })));
+                    await activeDb.participants.bulkAdd(newParticipants.map(name => ({ name })));
                 }
 
                 // Merge strangers (union)
-                const localStrangers = new Set((await db.strangers.toArray()).map(s => s.pair));
+                const localStrangers = new Set((await activeDb.strangers.toArray()).map(s => s.pair));
                 const strData = await sheetsApi(`${sid}/values/Strangers!A:A`);
                 const newStrangerPairs = [];
                 if (strData.values) {
@@ -1745,7 +1758,7 @@
                     });
                 }
                 if (newStrangerPairs.length > 0) {
-                    await db.strangers.bulkAdd(newStrangerPairs.map(pair => ({ pair })));
+                    await activeDb.strangers.bulkAdd(newStrangerPairs.map(pair => ({ pair })));
                 }
 
                 T.info('sync', `Pulled ${addedCount} new, ${updatedCount} updated expenses, ${newParticipants.length} participants, ${newStrangerPairs.length} strangers`);
@@ -1755,7 +1768,7 @@
             };
 
             const syncWithSheet = async () => {
-                if (!accessToken || !sheetId) return;
+                if (playgroundMode || !accessToken || !sheetId) return;
                 setSyncStatus('syncing');
                 const span = T.startSpan('syncWithSheet', 'sync');
                 try {
@@ -1863,10 +1876,10 @@
                         localStorage.setItem('divvy_sheet_id', joiningSheetId);
 
                         // Full replace: clear local data before pulling from new sheet
-                        await db.transaction('rw', db.participants, db.expenses, db.strangers, async () => {
-                            await db.participants.clear();
-                            await db.expenses.clear();
-                            await db.strangers.clear();
+                        await activeDb.transaction('rw', activeDb.participants, activeDb.expenses, activeDb.strangers, async () => {
+                            await activeDb.participants.clear();
+                            await activeDb.expenses.clear();
+                            await activeDb.strangers.clear();
                         });
                         T.info('sync', 'Cleared local data before joining trip');
 
@@ -2065,7 +2078,7 @@
                     T.interaction('addParticipant', name);
                     const span = T.startSpan('addParticipant', 'participant');
                     try {
-                        await db.participants.add({ name });
+                        await activeDb.participants.add({ name });
                         setParticipants(prev => [...prev, name]);
                         setSelectedBeneficiaries(prev => new Set(prev).add(name));
                         setNewParticipant('');
@@ -2081,7 +2094,7 @@
                 T.interaction('removeParticipant', name);
                 const span = T.startSpan('removeParticipant', 'participant');
                 try {
-                    await db.participants.delete(name);
+                    await activeDb.participants.delete(name);
                     setParticipants(participants.filter(p => p !== name));
                     setSelectedBeneficiaries(prev => { const s = new Set(prev); s.delete(name); return s; });
 
@@ -2102,11 +2115,11 @@
 
                 try {
                     if (strangers.has(key)) {
-                        await db.strangers.delete(key);
+                        await activeDb.strangers.delete(key);
                         setStrangers(prev => { const next = new Set(prev); next.delete(key); return next; });
                         span.end({ action: 'removed', pair: key });
                     } else {
-                        await db.strangers.put({ pair: key });
+                        await activeDb.strangers.put({ pair: key });
                         setStrangers(prev => { const next = new Set(prev); next.add(key); return next; });
                         span.end({ action: 'added', pair: key });
                     }
@@ -2119,7 +2132,7 @@
                 T.interaction('removeStrangerPair', pair);
                 const span = T.startSpan('removeStrangerPair', 'relationship');
                 try {
-                    await db.strangers.delete(pair);
+                    await activeDb.strangers.delete(pair);
                     setStrangers(prev => { const next = new Set(prev); next.delete(pair); return next; });
                     span.end({ removed: pair });
                 } catch (err) {
@@ -2128,6 +2141,10 @@
             };
 
             const resetTrip = async () => {
+                if (playgroundMode) {
+                    await exitPlayground();
+                    return;
+                }
                 T.interaction('resetTrip', 'all');
                 const span = T.startSpan('resetTrip', 'database');
                 try {
@@ -2136,7 +2153,7 @@
                     localStorage.setItem('divvy_user_reset', 'true');
                     localStorage.removeItem('divvy_sheet_id');
                     span.end({ success: true });
-                    T.info('app', '🗑️ Trip data reset, reloading page...');
+                    T.info('app', 'Trip data reset, reloading page...');
                     window.location.reload();
                 } catch (err) {
                     span.error(err);
@@ -2145,12 +2162,21 @@
                 }
             };
 
-            const loadDemoData = async () => {
-                T.interaction('loadDemoData', 'demo');
-                const span = T.startSpan('loadDemoData', 'database');
+            const enterPlayground = async () => {
+                T.interaction('enterPlayground', 'demo');
+                const span = T.startSpan('enterPlayground', 'database');
                 try {
+                    // Switch to sandbox database
+                    activeDb = playgroundDb;
+
+                    // Clear any previous playground data
+                    await activeDb.participants.clear();
+                    await activeDb.expenses.clear();
+                    await activeDb.strangers.clear();
+
+                    // Load demo data into sandbox
                     const defaults = ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'];
-                    await db.participants.bulkAdd(defaults.map(name => ({ name })));
+                    await activeDb.participants.bulkAdd(defaults.map(name => ({ name })));
 
                     const now = new Date().toISOString();
                     const demoExpenses = [
@@ -2162,17 +2188,46 @@
                         { id: generateId(), payer: 'Morgan', amount: 55, description: 'Breakfast & coffee', beneficiaries: ['Alex', 'Jordan', 'Sam', 'Riley', 'Morgan'], date: new Date(Date.now() - 0.5 * 24 * 60 * 60 * 1000), lastModified: now, deleted: false },
                         { id: generateId(), payer: 'Jordan', amount: 30, description: 'Gas money', beneficiaries: ['Alex', 'Jordan', 'Riley'], date: new Date(), lastModified: now, deleted: false },
                     ];
-                    await db.expenses.bulkAdd(demoExpenses);
-                    await db.strangers.add({ pair: 'Jordan|Morgan' });
+                    await activeDb.expenses.bulkAdd(demoExpenses);
+                    await activeDb.strangers.add({ pair: 'Jordan|Morgan' });
 
-                    localStorage.removeItem('divvy_user_reset');
+                    setPlaygroundMode(true);
                     span.end({ participants: defaults.length, expenses: demoExpenses.length });
-                    T.info('app', '📦 Demo data loaded, reloading page...');
-                    window.location.reload();
+                    T.info('app', 'Entered playground mode with demo data');
+
+                    // Load sandbox data into UI (no page reload)
+                    await loadDataFromDB();
+                } catch (err) {
+                    // Revert to main DB on failure
+                    activeDb = db;
+                    span.error(err);
+                    T.error('database', 'Failed to enter playground mode', { error: err.message });
+                    alert('Failed to enter playground mode');
+                }
+            };
+
+            const exitPlayground = async () => {
+                T.interaction('exitPlayground', 'demo');
+                const span = T.startSpan('exitPlayground', 'database');
+                try {
+                    // Switch back to real database
+                    activeDb = db;
+                    setPlaygroundMode(false);
+
+                    // Clean up playground database
+                    playgroundDb.close();
+                    await Dexie.delete('TripExpenseDB_Playground');
+                    // Re-open for future use
+                    await playgroundDb.open();
+
+                    span.end({ success: true });
+                    T.info('app', 'Exited playground mode');
+
+                    // Reload real data into UI
+                    await loadDataFromDB();
                 } catch (err) {
                     span.error(err);
-                    T.error('database', 'Failed to load demo data', { error: err.message });
-                    alert('Failed to load demo data');
+                    T.error('database', 'Failed to exit playground mode', { error: err.message });
                 }
             };
 
@@ -2198,7 +2253,7 @@
                 };
 
                 try {
-                    await db.expenses.add(newExpense);
+                    await activeDb.expenses.add(newExpense);
                     setExpenses(prev => [newExpense, ...prev]);
                     setAmount('');
                     setDescription('');
@@ -2338,18 +2393,18 @@
 
                     // Atomic Update
                     try {
-                        await db.transaction('rw', db.participants, db.expenses, db.strangers, async () => {
-                            await db.participants.clear();
-                            await db.expenses.clear();
-                            await db.strangers.clear();
+                        await activeDb.transaction('rw', activeDb.participants, activeDb.expenses, activeDb.strangers, async () => {
+                            await activeDb.participants.clear();
+                            await activeDb.expenses.clear();
+                            await activeDb.strangers.clear();
 
                             const sortedParticipants = Array.from(newParticipants).sort();
-                            await db.participants.bulkAdd(sortedParticipants.map(name => ({ name })));
+                            await activeDb.participants.bulkAdd(sortedParticipants.map(name => ({ name })));
 
-                            await db.expenses.bulkAdd(newExpenses);
+                            await activeDb.expenses.bulkAdd(newExpenses);
 
                             const strangerArr = Array.from(newStrangers).map(pair => ({ pair }));
-                            if (strangerArr.length > 0) await db.strangers.bulkAdd(strangerArr);
+                            if (strangerArr.length > 0) await activeDb.strangers.bulkAdd(strangerArr);
                         });
 
                         span.end({ success: true, expenses: newExpenses.length, participants: newParticipants.size });
@@ -2536,8 +2591,15 @@
                                 <span className="text-2xl font-bold text-[#111814] dark:text-white">{formatMoney(totalSpent)}</span>
                             </div>
 
-                            {/* Google Sheets Sync Buttons */}
-                            {!googleUser ? (
+                            {/* Google Sheets Sync Buttons (hidden in playground mode) */}
+                            {playgroundMode ? (
+                                <Tooltip text="Sync disabled in playground mode">
+                                    <span className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg text-sm font-medium text-slate-400 dark:text-slate-500 cursor-not-allowed">
+                                        <Icon name="cloud_off" className="text-[18px]" />
+                                        <span className="hidden sm:inline">Sync Off</span>
+                                    </span>
+                                </Tooltip>
+                            ) : !googleUser ? (
                                 <button
                                     onClick={googleSignIn}
                                     className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-white dark:bg-white/10 hover:bg-slate-50 dark:hover:bg-white/20 border border-slate-200 dark:border-white/20 rounded-lg transition-colors text-sm font-medium text-slate-600 dark:text-slate-300"
@@ -2599,14 +2661,38 @@
                             )}
 
                             <button
-                                onClick={() => setShowResetConfirm(true)}
-                                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-slate-100 dark:bg-white/10 hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 rounded-lg transition-colors text-sm font-medium"
+                                onClick={playgroundMode ? exitPlayground : () => setShowResetConfirm(true)}
+                                className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 rounded-lg transition-colors text-sm font-medium ${
+                                    playgroundMode
+                                        ? 'bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-800/40 text-amber-700 dark:text-amber-300'
+                                        : 'bg-slate-100 dark:bg-white/10 hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400'
+                                }`}
                             >
-                                <Icon name="restart_alt" className="text-[18px]" />
-                                <span className="hidden sm:inline">New Trip</span>
+                                <Icon name={playgroundMode ? "exit_to_app" : "restart_alt"} className="text-[18px]" />
+                                <span className="hidden sm:inline">{playgroundMode ? 'Exit Playground' : 'New Trip'}</span>
                             </button>
                         </div>
                     </header>
+
+                    {/* Playground Mode Banner */}
+                    {playgroundMode && (
+                        <div className="sticky top-[57px] sm:top-[65px] z-40 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-700/50 px-4 sm:px-8 py-2">
+                            <div className="flex items-center justify-between max-w-[1600px] mx-auto">
+                                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                                    <Icon name="science" className="text-[18px]" />
+                                    <span className="text-sm font-semibold">Playground Mode</span>
+                                    <span className="text-xs text-amber-600 dark:text-amber-400 hidden sm:inline">— Demo data only. Your real data is safe.</span>
+                                </div>
+                                <button
+                                    onClick={exitPlayground}
+                                    className="flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 bg-amber-100 dark:bg-amber-800/40 hover:bg-amber-200 dark:hover:bg-amber-800/60 px-3 py-1.5 rounded-lg transition-colors"
+                                >
+                                    <Icon name="exit_to_app" className="text-[14px]" />
+                                    Exit Playground
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     <main className="flex-1">
                         <div className="w-full max-w-[1600px] mx-auto px-3 py-4 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
