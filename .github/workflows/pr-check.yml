@@ -27,8 +27,9 @@ jobs:
         run: npm install
 
       - name: Run Jest tests with coverage
-        run: npm test -- --coverage
-        continue-on-error: false
+        id: test
+        run: npm test -- --coverage --verbose 2>&1 | tee test-output.txt
+        continue-on-error: true
 
       - name: Comment coverage on PR
         uses: actions/github-script@v7
@@ -38,26 +39,73 @@ jobs:
           script: |
             const fs = require('fs');
             let coverageComment = '## 📊 Test Results\n\n';
+            let testsPassed = false;
 
+            // Parse test output for failures
+            try {
+              const testOutput = fs.readFileSync('test-output.txt', 'utf8');
+
+              // Check if tests passed
+              testsPassed = testOutput.includes('Tests:') && !testOutput.includes('failed');
+
+              // Extract failed tests
+              const failureRegex = /● (.+?)(?=\n\n|● |$)/gs;
+              const failures = [...testOutput.matchAll(failureRegex)];
+
+              if (!testsPassed && failures.length > 0) {
+                coverageComment += '### ❌ Test Failures\n\n';
+                failures.slice(0, 10).forEach(match => {
+                  const failureText = match[1].trim();
+                  const lines = failureText.split('\n');
+                  const testName = lines[0];
+                  coverageComment += `**${testName}**\n\`\`\`\n${failureText}\n\`\`\`\n\n`;
+                });
+
+                if (failures.length > 10) {
+                  coverageComment += `_... and ${failures.length - 10} more failures_\n\n`;
+                }
+              } else if (testsPassed) {
+                coverageComment += '### ✅ All Tests Passed\n\n';
+              }
+
+              // Extract test summary
+              const summaryMatch = testOutput.match(/Tests:\s+(.+?)(?=\n|$)/);
+              const suiteMatch = testOutput.match(/Test Suites:\s+(.+?)(?=\n|$)/);
+
+              if (summaryMatch || suiteMatch) {
+                coverageComment += '### Test Summary\n';
+                if (suiteMatch) coverageComment += `- Test Suites: ${suiteMatch[1]}\n`;
+                if (summaryMatch) coverageComment += `- Tests: ${summaryMatch[1]}\n`;
+                coverageComment += '\n';
+              }
+            } catch (error) {
+              coverageComment += '⚠️ Could not parse test output\n\n';
+            }
+
+            // Add coverage report
             try {
               const coverage = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json', 'utf8'));
               const total = coverage.total;
 
+              coverageComment += '### Coverage Report\n\n';
               coverageComment += '| Metric | Coverage |\n';
               coverageComment += '|--------|----------|\n';
               coverageComment += `| Lines | ${total.lines.pct}% |\n`;
               coverageComment += `| Statements | ${total.statements.pct}% |\n`;
               coverageComment += `| Functions | ${total.functions.pct}% |\n`;
-              coverageComment += `| Branches | ${total.branches.pct}% |\n`;
+              coverageComment += `| Branches | ${total.branches.pct}% |\n\n`;
 
               if (total.lines.pct < 80) {
-                coverageComment += '\n⚠️ Coverage is below 80%';
+                coverageComment += '⚠️ Coverage is below 80%\n';
               } else {
-                coverageComment += '\n✅ Coverage looks good!';
+                coverageComment += '✅ Coverage looks good!\n';
               }
             } catch (error) {
-              coverageComment += '❌ Tests failed or coverage report not generated.\n';
+              coverageComment += '### ⚠️ Coverage Report\n\nCoverage report not generated (tests may have failed before completion)\n';
             }
+
+            // Add exit status
+            coverageComment += `\n---\n_Updated at: ${new Date().toUTCString()}_`;
 
             // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
@@ -85,6 +133,10 @@ jobs:
                 body: coverageComment
               });
             }
+
+      - name: Fail job if tests failed
+        if: steps.test.outcome != 'success'
+        run: exit 1
 
   build:
     name: Build Production Bundle
