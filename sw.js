@@ -1,4 +1,4 @@
-const CACHE_NAME = 'divvy-v3';
+const CACHE_NAME = 'divvy-v4';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -52,12 +52,15 @@ self.addEventListener('fetch', (event) => {
       .then((response) => {
         // Only cache successful responses from same origin or CDN resources
         if (response && response.status === 200) {
+          // Cache static resources only; do NOT cache dynamic API calls
+          // (sheets.googleapis.com, www.googleapis.com are dynamic)
           const shouldCache = isSameOrigin ||
                             url.hostname.includes('esm.sh') ||
                             url.hostname.includes('unpkg.com') ||
                             url.hostname.includes('cdn.jsdelivr.net') ||
                             url.hostname.includes('fonts.googleapis.com') ||
-                            url.hostname.includes('fonts.gstatic.com');
+                            url.hostname.includes('fonts.gstatic.com') ||
+                            url.hostname.includes('accounts.google.com');
 
           if (shouldCache) {
             const responseClone = response.clone();

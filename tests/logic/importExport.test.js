@@ -37,11 +37,33 @@ Jan 20, 3:00 PM	Hotel	Alice	90.00	Alice, Bob, Charlie	2026-01-20T15:00:00.000Z	0
       expect(result.expenses[0].payer).toBe('Alice');
       expect(result.expenses[0].amount).toBe(90.00);
       expect(result.expenses[0].description).toBe('Hotel');
+      expect(result.expenses[0].id).toBe('0');
       expect(result.expenses[0].beneficiaries).toEqual([
         'Alice',
         'Bob',
         'Charlie',
       ]);
+    });
+
+    test('Preserves UUID IDs from TSV', () => {
+      const uuid = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+      const tsvData = `EXPENSE HISTORY
+Date	Description	Payer	Amount	Beneficiaries	ISO_Timestamp	ID
+Jan 20, 3:00 PM	Hotel	Alice	90.00	Alice, Bob	2026-01-20T15:00:00.000Z	${uuid}`;
+
+      const result = parseTSV(tsvData);
+
+      expect(result.expenses[0].id).toBe(uuid);
+    });
+
+    test('Sets id to undefined when ID column is missing', () => {
+      const tsvData = `EXPENSE HISTORY
+Date	Description	Payer	Amount	Beneficiaries	ISO_Timestamp
+Jan 20, 3:00 PM	Hotel	Alice	90.00	Alice, Bob	2026-01-20T15:00:00.000Z`;
+
+      const result = parseTSV(tsvData);
+
+      expect(result.expenses[0].id).toBeUndefined();
     });
 
     test('Extracts ISO timestamp as Date object', () => {
@@ -171,6 +193,7 @@ Jan 20, 3:00 PM	Test	Alice	50.00		2026-01-20T15:00:00.000Z	0`;
     test('Generates valid TSV format with headers', () => {
       const expenses = [
         {
+          id: 'test-uuid-1',
           date: new Date('2026-01-20T15:00:00.000Z'),
           description: 'Hotel',
           payer: 'Alice',
@@ -188,9 +211,29 @@ Jan 20, 3:00 PM	Test	Alice	50.00		2026-01-20T15:00:00.000Z	0`;
       expect(tsv).toContain('Hotel\tAlice\t90.00');
     });
 
+    test('Includes expense ID in output', () => {
+      const expenses = [
+        {
+          id: 'abc-123-def',
+          date: new Date('2026-01-20T15:00:00.000Z'),
+          description: 'Hotel',
+          payer: 'Alice',
+          amount: 90.0,
+          beneficiaries: ['Alice'],
+        },
+      ];
+      const participants = new Set(['Alice']);
+      const strangers = new Set();
+
+      const tsv = generateTSV(expenses, participants, strangers, 90.0);
+
+      expect(tsv).toContain('abc-123-def');
+    });
+
     test('Formats amounts with 2 decimal places', () => {
       const expenses = [
         {
+          id: 'test-uuid-2',
           date: new Date('2026-01-20T15:00:00.000Z'),
           description: 'Test',
           payer: 'Alice',
@@ -209,6 +252,7 @@ Jan 20, 3:00 PM	Test	Alice	50.00		2026-01-20T15:00:00.000Z	0`;
     test('Includes ISO timestamp for each expense', () => {
       const expenses = [
         {
+          id: 'test-uuid-3',
           date: new Date('2026-01-20T15:00:00.000Z'),
           description: 'Hotel',
           payer: 'Alice',
@@ -227,6 +271,7 @@ Jan 20, 3:00 PM	Test	Alice	50.00		2026-01-20T15:00:00.000Z	0`;
     test('Joins beneficiaries with commas and spaces', () => {
       const expenses = [
         {
+          id: 'test-uuid-4',
           date: new Date('2026-01-20T15:00:00.000Z'),
           description: 'Hotel',
           payer: 'Alice',
@@ -245,6 +290,7 @@ Jan 20, 3:00 PM	Test	Alice	50.00		2026-01-20T15:00:00.000Z	0`;
     test('Removes tabs and newlines from descriptions', () => {
       const expenses = [
         {
+          id: 'test-uuid-5',
           date: new Date('2026-01-20T15:00:00.000Z'),
           description: 'Hotel\tand\nDinner',
           payer: 'Alice',
@@ -264,6 +310,7 @@ Jan 20, 3:00 PM	Test	Alice	50.00		2026-01-20T15:00:00.000Z	0`;
     test('Includes TOTAL SPENT section', () => {
       const expenses = [
         {
+          id: 'test-uuid-6',
           date: new Date('2026-01-20T15:00:00.000Z'),
           description: 'Test',
           payer: 'Alice',
@@ -303,6 +350,7 @@ Jan 20, 3:00 PM	Test	Alice	50.00		2026-01-20T15:00:00.000Z	0`;
     test('Generates multiple expense entries', () => {
       const expenses = [
         {
+          id: 'test-uuid-7',
           date: new Date('2026-01-20T15:00:00.000Z'),
           description: 'Hotel',
           payer: 'Alice',
@@ -310,6 +358,7 @@ Jan 20, 3:00 PM	Test	Alice	50.00		2026-01-20T15:00:00.000Z	0`;
           beneficiaries: ['Alice', 'Bob'],
         },
         {
+          id: 'test-uuid-8',
           date: new Date('2026-01-21T16:00:00.000Z'),
           description: 'Dinner',
           payer: 'Bob',

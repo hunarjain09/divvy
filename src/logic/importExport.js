@@ -50,6 +50,7 @@ export function parseTSV(text) {
         const beneficiaries = cols[4] ? cols[4].split(', ') : [];
 
         result.expenses.push({
+          id: cols[6] || undefined,
           date,
           description: cols[1] || 'Imported Expense',
           payer: cols[2],
@@ -89,12 +90,12 @@ export function generateTSV(expenses, participants, strangers, totalSpent) {
       minute: 'numeric',
     }).format(date);
 
-  expenses.forEach((exp, idx) => {
+  expenses.forEach((exp) => {
     const dateStr = `${formatDate(exp.date)} ${formatTime(exp.date)}`;
     const cleanDesc = exp.description.replace(/[\t\n]/g, ' ');
     const benStr = exp.beneficiaries.join(', ');
     const isoDate = exp.date.toISOString();
-    tsv += `${dateStr}\t${cleanDesc}\t${exp.payer}\t${exp.amount.toFixed(2)}\t${benStr}\t${isoDate}\t${idx}\n`;
+    tsv += `${dateStr}\t${cleanDesc}\t${exp.payer}\t${exp.amount.toFixed(2)}\t${benStr}\t${isoDate}\t${exp.id || ''}\n`;
   });
 
   tsv += `\nTOTAL SPENT\t${totalSpent.toFixed(2)}\n\n`;
