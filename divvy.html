@@ -577,8 +577,17 @@
             const [showResetConfirm, setShowResetConfirm] = useState(false);
 
             // Google Sheets Sync State
-            const [googleUser, setGoogleUser] = useState(null);         // { name, email, picture }
-            const [accessToken, setAccessToken] = useState(null);       // OAuth token (in-memory)
+            const [googleUser, setGoogleUser] = useState(() => {
+                try { const s = sessionStorage.getItem('divvy_google_user'); return s ? JSON.parse(s) : null; } catch { return null; }
+            });
+            const [accessToken, setAccessToken] = useState(() => {
+                try {
+                    const s = sessionStorage.getItem('divvy_access_token');
+                    if (!s) return null;
+                    const { token, expiresAt } = JSON.parse(s);
+                    return Date.now() < expiresAt ? token : null;
+                } catch { return null; }
+            });
             const [sheetId, setSheetId] = useState(() => localStorage.getItem('divvy_sheet_id'));
             const [syncStatus, setSyncStatus] = useState('idle');       // 'idle' | 'syncing' | 'error' | 'success'
             const [lastSynced, setLastSynced] = useState(null);
@@ -1445,12 +1454,16 @@
                         callback: async (response) => {
                             if (response.access_token) {
                                 setAccessToken(response.access_token);
+                                const expiresAt = Date.now() + (response.expires_in || 3600) * 1000;
+                                sessionStorage.setItem('divvy_access_token', JSON.stringify({ token: response.access_token, expiresAt }));
                                 try {
                                     const userInfo = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                                         headers: { 'Authorization': `Bearer ${response.access_token}` }
                                     });
                                     const info = await userInfo.json();
-                                    setGoogleUser({ name: info.name, email: info.email, picture: info.picture });
+                                    const user = { name: info.name, email: info.email, picture: info.picture };
+                                    setGoogleUser(user);
+                                    sessionStorage.setItem('divvy_google_user', JSON.stringify(user));
                                     T.info('auth', 'Google sign-in successful', { email: info.email });
                                 } catch (err) {
                                     T.error('auth', 'Failed to fetch user info', { error: err.message });
@@ -1475,6 +1488,8 @@
                 }
                 setAccessToken(null);
                 setGoogleUser(null);
+                sessionStorage.removeItem('divvy_access_token');
+                sessionStorage.removeItem('divvy_google_user');
                 T.info('auth', 'Google signed out');
             };
 
