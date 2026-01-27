@@ -1,3 +1,34 @@
+// --- Service Worker Logger (matches DivvyTracer style) ---
+const SW = (() => {
+  const sessionStart = Date.now();
+  const getRelativeTime = () => ((Date.now() - sessionStart) / 1000).toFixed(3);
+
+  const log = (level, category, message, data = null) => {
+    const colors = {
+      debug: 'color: #60a5fa',
+      info: 'color: #34d399',
+      warn: 'color: #fbbf24',
+      error: 'color: #f87171'
+    };
+
+    const timeStr = `+${getRelativeTime()}s`;
+    console.log(
+      `%c${timeStr} %c[${level.toUpperCase()}]%c [${category}] ${message}`,
+      'color: #6b7280; font-weight: bold',
+      colors[level],
+      'color: inherit',
+      data || ''
+    );
+  };
+
+  return {
+    debug: (cat, msg, data) => log('debug', cat, msg, data),
+    info: (cat, msg, data) => log('info', cat, msg, data),
+    warn: (cat, msg, data) => log('warn', cat, msg, data),
+    error: (cat, msg, data) => log('error', cat, msg, data)
+  };
+})();
+
 const CACHE_NAME = 'divvy-v4';
 const ASSETS_TO_CACHE = [
   './',
@@ -19,25 +50,55 @@ const ASSETS_TO_CACHE = [
 
 // Install event - cache assets
 self.addEventListener('install', (event) => {
+  SW.info('sw', '🔧 Installing service worker', { cacheName: CACHE_NAME, assetCount: ASSETS_TO_CACHE.length });
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        return cache.addAll(ASSETS_TO_CACHE);
+        // Cache assets individually to identify which one fails
+        return Promise.all(
+          ASSETS_TO_CACHE.map(url => {
+            return cache.add(url)
+              .then(() => {
+                SW.debug('sw:cache', `✓ Cached: ${url}`);
+              })
+              .catch((error) => {
+                SW.error('sw:cache', `✗ Failed to cache: ${url}`, {
+                  url: url,
+                  message: error.message,
+                  stack: error.stack,
+                  name: error.name
+                });
+              });
+          })
+        );
       })
-      .then(() => self.skipWaiting())
+      .then(() => {
+        SW.info('sw', '✓ All cache attempts completed, skipping waiting');
+        return self.skipWaiting();
+      })
+      .catch((error) => {
+        SW.error('sw', '✗ Install failed', { message: error.message, stack: error.stack });
+      })
   );
 });
 
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
+  SW.info('sw', '🚀 Activating service worker', { cacheName: CACHE_NAME });
   event.waitUntil(
     caches.keys().then((cacheNames) => {
+      SW.debug('sw:cache', 'Existing caches found', { caches: cacheNames });
+      const oldCaches = cacheNames.filter((name) => name !== CACHE_NAME);
+      if (oldCaches.length > 0) {
+        SW.info('sw:cache', '🗑️ Deleting old caches', { oldCaches });
+      }
       return Promise.all(
-        cacheNames
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
+        oldCaches.map((name) => caches.delete(name))
       );
-    }).then(() => self.clients.claim())
+    }).then(() => {
+      SW.info('sw', '✓ Claiming clients');
+      return self.clients.claim();
+    })
   );
 });
 
