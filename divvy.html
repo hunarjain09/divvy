@@ -60,6 +60,10 @@
     <!-- Google Identity Services (OAuth2) -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 
+    <!-- Firebase SDK (for Push Notifications via FCM) -->
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
+
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
@@ -436,6 +440,25 @@
         const GOOGLE_CLIENT_ID = '852208883738-v7kfe15jsq7pgr89ur1b4lvk4d91jr9b.apps.googleusercontent.com';
         const GOOGLE_SCOPES = 'openid profile email https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
 
+        // --- Firebase Cloud Messaging Config ---
+        // Set these once as the project owner. Get values from:
+        //   Firebase Console > Project Settings > General > Your apps (Web)
+        //   Firebase Console > Project Settings > Cloud Messaging > Web Push certificates
+        //   Deploy apps-script/ via clasp and use the web app URL
+        const FIREBASE_CONFIG = {
+            // Replace with your Firebase project config
+            apiKey: '',
+            authDomain: '',
+            projectId: '',
+            storageBucket: '',
+            messagingSenderId: '',
+            appId: ''
+        };
+        const FIREBASE_VAPID_KEY = ''; // Web Push certificate key pair
+        const APPS_SCRIPT_URL = ''; // Deployed Apps Script web app URL (e.g. https://script.google.com/macros/s/.../exec)
+
+        const isNotificationsConfigured = () => Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_VAPID_KEY && APPS_SCRIPT_URL);
+
         // --- Dexie Database Setup ---
         const db = new Dexie('TripExpenseDB');
         db.version(1).stores({
@@ -635,6 +658,14 @@
                 }
                 return defaultOrder;
             });
+
+            // --- Push Notification State ---
+            const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+                return localStorage.getItem('divvy_notifications_enabled') === 'true';
+            });
+            const [showNotificationPanel, setShowNotificationPanel] = useState(false);
+            const fcmTokenRef = useRef(null);
+            const messagingRef = useRef(null);
 
             // Get all section IDs across all columns
             const getAllSectionIds = () => {
@@ -2231,6 +2262,157 @@
                 }
             };
 
+            // --- Push Notification Helpers ---
+            // Uses FCM Topics via Apps Script — the Sheet ID is the topic/group.
+            // No separate group ID needed; sheet editors = notification group.
+
+            const initFirebaseMessaging = async () => {
+                if (messagingRef.current) return messagingRef.current;
+                if (!isNotificationsConfigured()) return null;
+                try {
+                    if (typeof firebase !== 'undefined') {
+                        if (!firebase.apps.length) {
+                            firebase.initializeApp(FIREBASE_CONFIG);
+                        }
+                        const messaging = firebase.messaging();
+                        messagingRef.current = messaging;
+                        return messaging;
+                    }
+                } catch (err) {
+                    T.error('notifications', 'Firebase init failed', { error: err.message });
+                }
+                return null;
+            };
+
+            // Store user email in Cache API so service worker can "mute myself"
+            const storeEmailForServiceWorker = async (email) => {
+                try {
+                    const cache = await caches.open('divvy-user');
+                    await cache.put('user-email', new Response(email));
+                } catch (err) {
+                    T.warn('notifications', 'Failed to cache user email for SW', { error: err.message });
+                }
+            };
+
+            const callAppsScript = async (action, extra = {}) => {
+                if (!accessToken || !sheetId) return { error: 'Not signed in or no sheet' };
+                const resp = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, accessToken, sheetId, ...extra }),
+                    redirect: 'follow'
+                });
+                return resp.json();
+            };
+
+            const enableNotifications = async () => {
+                const span = T.startSpan('enableNotifications', 'notifications');
+                try {
+                    if (!isNotificationsConfigured()) {
+                        T.warn('notifications', 'Notifications not configured by project owner');
+                        span.end({ configured: false });
+                        return;
+                    }
+                    if (!sheetId || !accessToken) {
+                        T.warn('notifications', 'Must connect to a sheet first');
+                        span.end({ missingSheet: true });
+                        return;
+                    }
+
+                    const permission = await Notification.requestPermission();
+                    if (permission !== 'granted') {
+                        T.warn('notifications', 'Permission denied', { permission });
+                        span.end({ permission });
+                        return;
+                    }
+
+                    const messaging = await initFirebaseMessaging();
+                    if (!messaging) {
+                        span.end({ error: 'messaging init failed' });
+                        return;
+                    }
+
+                    const swReg = window.__swRegistration ? await window.__swRegistration : null;
+                    const tokenOptions = { vapidKey: FIREBASE_VAPID_KEY };
+                    if (swReg) tokenOptions.serviceWorkerRegistration = swReg;
+
+                    const token = await messaging.getToken(tokenOptions);
+                    T.info('notifications', 'FCM token obtained', { tokenPrefix: token.substring(0, 20) + '...' });
+                    fcmTokenRef.current = token;
+
+                    // Subscribe FCM token to the sheet's topic via Apps Script
+                    const result = await callAppsScript('subscribe', { fcmToken: token });
+                    if (result.error) {
+                        T.error('notifications', 'Subscribe failed', result);
+                        span.end({ error: result.error });
+                        return;
+                    }
+
+                    setNotificationsEnabled(true);
+                    localStorage.setItem('divvy_notifications_enabled', 'true');
+
+                    // Store email for "mute myself" in service worker
+                    if (googleUser?.email) {
+                        await storeEmailForServiceWorker(googleUser.email);
+                    }
+
+                    // Handle foreground messages (mute-myself on main thread too)
+                    messaging.onMessage((payload) => {
+                        T.info('notifications', 'Foreground message', payload);
+                        const d = payload.data || {};
+                        if (d.sender === googleUser?.email) return; // Mute myself
+                        if (Notification.permission === 'granted') {
+                            new Notification(d.title || 'Divvy', {
+                                body: d.body || 'New activity',
+                                icon: 'icons/icon-192x192.png'
+                            });
+                        }
+                    });
+
+                    span.end({ success: true });
+                } catch (err) {
+                    span.error(err);
+                    T.error('notifications', 'Failed to enable', { error: err.message });
+                }
+            };
+
+            const disableNotifications = async () => {
+                try {
+                    if (fcmTokenRef.current && sheetId && accessToken) {
+                        await callAppsScript('unsubscribe', { fcmToken: fcmTokenRef.current });
+                    }
+                } catch (err) {
+                    T.error('notifications', 'Unsubscribe failed', { error: err.message });
+                }
+                setNotificationsEnabled(false);
+                fcmTokenRef.current = null;
+                messagingRef.current = null;
+                localStorage.removeItem('divvy_notifications_enabled');
+                T.info('notifications', 'Notifications disabled');
+            };
+
+            const sendExpenseNotification = async (expense) => {
+                if (!notificationsEnabled || !sheetId || !accessToken) return;
+                try {
+                    await callAppsScript('notify', {
+                        message: {
+                            title: 'New Expense Added',
+                            body: `${expense.payer} paid ${formatMoney(expense.amount)} for ${expense.description}`
+                        }
+                    });
+                    T.info('notifications', 'Expense notification sent');
+                } catch (err) {
+                    T.error('notifications', 'Notify failed', { error: err.message });
+                }
+            };
+
+            // Auto-initialize notifications if previously enabled and sheet connected
+            useEffect(() => {
+                if (notificationsEnabled && isNotificationsConfigured() && sheetId && accessToken && !fcmTokenRef.current) {
+                    enableNotifications();
+                }
+            }, [sheetId, accessToken]);
+
             const submitExpense = async () => {
                 const val = parseFloat(amount);
                 if (!payer || isNaN(val) || val <= 0 || selectedBeneficiaries.size === 0) {
@@ -2260,6 +2442,9 @@
                     setViewMode('history');
                     span.end({ id: newExpense.id, amount: val, payer, beneficiaries: newExpense.beneficiaries.length });
                     T.info('expense', `💰 New expense: ${formatMoney(val)} by ${payer}`, { description: newExpense.description });
+
+                    // Send push notification to group members (fire-and-forget)
+                    sendExpenseNotification(newExpense);
                 } catch (err) {
                     span.error(err);
                 }
@@ -2574,6 +2759,57 @@
                         </div>
                     )}
 
+                    {/* Notification Panel */}
+                    {showNotificationPanel && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowNotificationPanel(false)}>
+                            <div className="bg-white dark:bg-[#1a2e22] rounded-2xl shadow-2xl max-w-sm w-full border border-slate-200 dark:border-white/10" onClick={e => e.stopPropagation()}>
+                                <div className="p-6">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="size-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                                                <Icon name="notifications" className="text-primary text-[22px]" />
+                                            </div>
+                                            <h2 className="text-lg font-bold text-text-main dark:text-white">Push Notifications</h2>
+                                        </div>
+                                        <button onClick={() => setShowNotificationPanel(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                                            <Icon name="close" />
+                                        </button>
+                                    </div>
+
+                                    {notificationsEnabled ? (
+                                        <div className="space-y-4">
+                                            <div className="flex items-center gap-2 text-sm text-primary-dark dark:text-primary bg-primary/10 rounded-lg px-3 py-2">
+                                                <Icon name="check_circle" className="text-[18px]" />
+                                                <span className="font-medium">Notifications are on</span>
+                                            </div>
+                                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                                You'll be notified when someone adds an expense to this sheet.
+                                            </p>
+                                            <button
+                                                onClick={() => { disableNotifications(); setShowNotificationPanel(false); }}
+                                                className="w-full py-2.5 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl transition-colors text-sm border border-red-200 dark:border-red-800"
+                                            >
+                                                Turn Off Notifications
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                                Get notified when someone adds an expense to this sheet. All editors of the sheet can subscribe.
+                                            </p>
+                                            <button
+                                                onClick={() => { enableNotifications(); setShowNotificationPanel(false); }}
+                                                className="w-full py-2.5 bg-primary hover:bg-primary-dark text-text-main font-bold rounded-xl transition-colors text-sm"
+                                            >
+                                                Enable Notifications
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Header */}
                     <header className="sticky top-0 z-50 flex items-center justify-between whitespace-nowrap border-b border-solid border-[#dce5df] dark:border-white/10 px-4 sm:px-8 py-3 sm:py-4 bg-white dark:bg-[#1a2e22] shadow-sm">
                         <div className="flex items-center gap-3 sm:gap-4 cursor-pointer group transition-opacity hover:opacity-80 min-w-0" onClick={() => setShowBenefitsModal(true)} title="Click to see features">
@@ -2658,6 +2894,26 @@
                                         )}
                                     </button>
                                 </>
+                            )}
+
+                            {/* Push Notification Bell */}
+                            {isNotificationsConfigured() && sheetId && (
+                                <Tooltip text={notificationsEnabled ? "Notifications on" : "Enable notifications"}>
+                                    <button
+                                        onClick={() => setShowNotificationPanel(true)}
+                                        className={`relative flex items-center justify-center size-9 rounded-lg transition-colors ${
+                                            notificationsEnabled
+                                                ? 'bg-primary/10 hover:bg-primary/20 text-primary-dark dark:text-primary border border-primary/30'
+                                                : 'bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/10'
+                                        }`}
+                                        title={notificationsEnabled ? "Notification settings" : "Enable push notifications"}
+                                    >
+                                        <Icon name={notificationsEnabled ? "notifications_active" : "notifications_none"} className="text-[18px]" />
+                                        {notificationsEnabled && (
+                                            <span className="absolute -top-0.5 -right-0.5 size-2.5 bg-primary rounded-full border-2 border-white dark:border-[#1a2e22]"></span>
+                                        )}
+                                    </button>
+                                </Tooltip>
                             )}
 
                             <button
@@ -2749,7 +3005,7 @@
     <!-- Service Worker Registration -->
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js');
+            window.__swRegistration = navigator.serviceWorker.register('sw.js');
         }
     </script>
 </body>

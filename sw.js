@@ -121,7 +121,8 @@ self.addEventListener('fetch', (event) => {
                             url.hostname.includes('cdn.jsdelivr.net') ||
                             url.hostname.includes('fonts.googleapis.com') ||
                             url.hostname.includes('fonts.gstatic.com') ||
-                            url.hostname.includes('accounts.google.com');
+                            url.hostname.includes('accounts.google.com') ||
+                            url.hostname.includes('www.gstatic.com');
 
           if (shouldCache) {
             const responseClone = response.clone();
@@ -137,6 +138,89 @@ self.addEventListener('fetch', (event) => {
       .catch(() => {
         // Fall back to cache
         return caches.match(event.request);
+      })
+  );
+});
+
+// --- Push Notification Handling ---
+
+// Read the current user's email from the Cache API (set by the main thread).
+// Used for "mute myself" — don't show notifications for your own expenses.
+async function getCurrentUserEmail() {
+  try {
+    const cache = await caches.open('divvy-user');
+    const response = await cache.match('user-email');
+    return response ? await response.text() : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+self.addEventListener('push', (event) => {
+  SW.info('push', '📬 Push notification received');
+
+  if (!event.data) {
+    SW.warn('push', 'Push event has no data');
+    return;
+  }
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch (e) {
+    SW.error('push', 'Failed to parse push data', { error: e.message });
+    payload = { notification: { title: 'Divvy', body: event.data.text() } };
+  }
+
+  // Support both FCM notification and data-only payloads
+  const notification = payload.notification || {};
+  const data = payload.data || {};
+
+  const title = notification.title || data.title || 'Divvy';
+  const body = notification.body || data.body || 'New activity in your group';
+  const senderEmail = data.sender || '';
+
+  // "Mute Myself" — suppress notification if the current user sent it
+  const showPromise = getCurrentUserEmail().then(myEmail => {
+    if (myEmail && senderEmail && myEmail === senderEmail) {
+      SW.info('push', 'Muting own notification', { sender: senderEmail });
+      return;
+    }
+
+    const options = {
+      body,
+      icon: notification.icon || data.icon || './icons/icon-192x192.png',
+      badge: './icons/icon-96x96.png',
+      data: { url: data.url || './', ...data },
+      tag: data.tag || 'divvy-expense',
+      renotify: true,
+      requireInteraction: false
+    };
+
+    SW.info('push', `Showing notification: "${title}"`, options);
+    return self.registration.showNotification(title, options);
+  });
+
+  event.waitUntil(showPromise);
+});
+
+// Handle notification click — focus existing window or open new one
+self.addEventListener('notificationclick', (event) => {
+  SW.info('push', 'Notification clicked', { action: event.action });
+  event.notification.close();
+
+  if (event.action === 'dismiss') return;
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(clientList => {
+        for (const client of clientList) {
+          if ('focus' in client) {
+            return client.focus();
+          }
+        }
+        const url = event.notification.data?.url || './';
+        return clients.openWindow(url);
       })
   );
 });
