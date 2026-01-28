@@ -440,6 +440,25 @@
         const GOOGLE_CLIENT_ID = '852208883738-v7kfe15jsq7pgr89ur1b4lvk4d91jr9b.apps.googleusercontent.com';
         const GOOGLE_SCOPES = 'openid profile email https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
 
+        // --- Firebase Cloud Messaging Config ---
+        // Set these once as the project owner. Get values from:
+        //   Firebase Console > Project Settings > General > Your apps (Web)
+        //   Firebase Console > Project Settings > Cloud Messaging > Web Push certificates
+        //   Deploy functions/ and use the Cloud Function base URL
+        const FIREBASE_CONFIG = {
+            // Replace with your Firebase project config
+            apiKey: '',
+            authDomain: '',
+            projectId: '',
+            storageBucket: '',
+            messagingSenderId: '',
+            appId: ''
+        };
+        const FIREBASE_VAPID_KEY = ''; // Web Push certificate key pair
+        const NOTIFICATION_FUNCTION_URL = ''; // e.g. https://us-central1-yourproject.cloudfunctions.net
+
+        const isFirebaseConfigured = () => Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_VAPID_KEY && NOTIFICATION_FUNCTION_URL);
+
         // --- Dexie Database Setup ---
         const db = new Dexie('TripExpenseDB');
         db.version(1).stores({
@@ -644,7 +663,7 @@
             const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
                 return localStorage.getItem('divvy_notifications_enabled') === 'true';
             });
-            const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+            const [showNotificationPanel, setShowNotificationPanel] = useState(false);
             const [notificationGroupId, setNotificationGroupId] = useState(() =>
                 localStorage.getItem('divvy_notification_group') || ''
             );
@@ -2247,29 +2266,14 @@
             };
 
             // --- Push Notification Helpers ---
-            const getNotificationConfig = () => {
-                try {
-                    const firebaseConfig = localStorage.getItem('divvy_firebase_config');
-                    const vapidKey = localStorage.getItem('divvy_vapid_key');
-                    const notifyUrl = localStorage.getItem('divvy_notify_url');
-                    return {
-                        firebaseConfig: firebaseConfig ? JSON.parse(firebaseConfig) : null,
-                        vapidKey: vapidKey || '',
-                        notifyUrl: notifyUrl || ''
-                    };
-                } catch { return { firebaseConfig: null, vapidKey: '', notifyUrl: '' }; }
-            };
-
             const initFirebaseMessaging = async () => {
                 if (messagingRef.current) return messagingRef.current;
-
-                const { firebaseConfig, vapidKey } = getNotificationConfig();
-                if (!firebaseConfig || !vapidKey) return null;
+                if (!isFirebaseConfigured()) return null;
 
                 try {
                     if (typeof firebase !== 'undefined') {
                         if (!firebase.apps.length) {
-                            firebase.initializeApp(firebaseConfig);
+                            firebase.initializeApp(FIREBASE_CONFIG);
                         }
                         const messaging = firebase.messaging();
                         messagingRef.current = messaging;
@@ -2281,14 +2285,19 @@
                 return null;
             };
 
-            const enableNotifications = async () => {
+            const enableNotifications = async (groupId) => {
+                const gid = groupId || notificationGroupId;
                 const span = T.startSpan('enableNotifications', 'notifications');
                 try {
-                    const { firebaseConfig, vapidKey, notifyUrl } = getNotificationConfig();
-                    if (!firebaseConfig || !vapidKey) {
-                        T.warn('notifications', 'Firebase not configured — opening settings');
-                        setShowNotificationSettings(true);
+                    if (!isFirebaseConfigured()) {
+                        T.warn('notifications', 'Firebase not configured by project owner');
                         span.end({ configured: false });
+                        return;
+                    }
+                    if (!gid) {
+                        T.warn('notifications', 'No group ID — opening panel');
+                        setShowNotificationPanel(true);
+                        span.end({ missingGroup: true });
                         return;
                     }
 
@@ -2306,7 +2315,7 @@
                     }
 
                     const swReg = window.__swRegistration ? await window.__swRegistration : null;
-                    const tokenOptions = { vapidKey };
+                    const tokenOptions = { vapidKey: FIREBASE_VAPID_KEY };
                     if (swReg) tokenOptions.serviceWorkerRegistration = swReg;
 
                     const token = await messaging.getToken(tokenOptions);
@@ -2314,12 +2323,12 @@
 
                     fcmTokenRef.current = token;
                     setNotificationsEnabled(true);
+                    setNotificationGroupId(gid);
                     localStorage.setItem('divvy_notifications_enabled', 'true');
+                    localStorage.setItem('divvy_notification_group', gid);
 
                     // Subscribe to notification group
-                    if (notificationGroupId && notifyUrl) {
-                        await subscribeToNotificationGroup(token, notificationGroupId);
-                    }
+                    await subscribeToNotificationGroup(token, gid);
 
                     // Handle foreground messages
                     messaging.onMessage((payload) => {
@@ -2342,9 +2351,8 @@
 
             const disableNotifications = async () => {
                 try {
-                    const { notifyUrl } = getNotificationConfig();
-                    if (fcmTokenRef.current && notificationGroupId && notifyUrl) {
-                        await fetch(`${notifyUrl}/unsubscribe`, {
+                    if (fcmTokenRef.current && notificationGroupId) {
+                        await fetch(`${NOTIFICATION_FUNCTION_URL}/unsubscribe`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ groupId: notificationGroupId, token: fcmTokenRef.current })
@@ -2361,10 +2369,8 @@
             };
 
             const subscribeToNotificationGroup = async (token, groupId) => {
-                const { notifyUrl } = getNotificationConfig();
-                if (!notifyUrl) return;
                 try {
-                    await fetch(`${notifyUrl}/subscribe`, {
+                    await fetch(`${NOTIFICATION_FUNCTION_URL}/subscribe`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -2380,10 +2386,9 @@
             };
 
             const sendExpenseNotification = async (expense) => {
-                const { notifyUrl } = getNotificationConfig();
-                if (!notificationsEnabled || !notificationGroupId || !notifyUrl || !fcmTokenRef.current) return;
+                if (!notificationsEnabled || !notificationGroupId || !fcmTokenRef.current) return;
                 try {
-                    await fetch(`${notifyUrl}/notify`, {
+                    await fetch(`${NOTIFICATION_FUNCTION_URL}/notify`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -2399,27 +2404,9 @@
                 }
             };
 
-            const saveNotificationSettings = (firebaseConfigStr, vapidKey, notifyUrl, groupId) => {
-                try {
-                    const parsed = JSON.parse(firebaseConfigStr);
-                    localStorage.setItem('divvy_firebase_config', JSON.stringify(parsed));
-                } catch {
-                    T.error('notifications', 'Invalid Firebase config JSON');
-                    return false;
-                }
-                localStorage.setItem('divvy_vapid_key', vapidKey);
-                localStorage.setItem('divvy_notify_url', notifyUrl);
-                localStorage.setItem('divvy_notification_group', groupId);
-                setNotificationGroupId(groupId);
-                // Reset messaging ref so it re-initializes with new config
-                messagingRef.current = null;
-                T.info('notifications', 'Notification settings saved');
-                return true;
-            };
-
             // Auto-initialize notifications if previously enabled
             useEffect(() => {
-                if (notificationsEnabled && !fcmTokenRef.current) {
+                if (notificationsEnabled && isFirebaseConfigured() && !fcmTokenRef.current) {
                     enableNotifications();
                 }
             }, []);
@@ -2770,10 +2757,10 @@
                         </div>
                     )}
 
-                    {/* Notification Settings Modal */}
-                    {showNotificationSettings && (
-                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowNotificationSettings(false)}>
-                            <div className="bg-white dark:bg-[#1a2e22] rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-white/10" onClick={e => e.stopPropagation()}>
+                    {/* Notification Panel */}
+                    {showNotificationPanel && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowNotificationPanel(false)}>
+                            <div className="bg-white dark:bg-[#1a2e22] rounded-2xl shadow-2xl max-w-sm w-full border border-slate-200 dark:border-white/10" onClick={e => e.stopPropagation()}>
                                 <div className="p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="flex items-center gap-3">
@@ -2782,95 +2769,60 @@
                                             </div>
                                             <h2 className="text-lg font-bold text-text-main dark:text-white">Push Notifications</h2>
                                         </div>
-                                        <button onClick={() => setShowNotificationSettings(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                                        <button onClick={() => setShowNotificationPanel(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
                                             <Icon name="close" />
                                         </button>
                                     </div>
 
-                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">
-                                        Get notified when someone in your group adds an expense. Requires a Firebase project with Cloud Messaging enabled.
-                                    </p>
-
-                                    <form onSubmit={e => {
-                                        e.preventDefault();
-                                        const form = e.target;
-                                        const ok = saveNotificationSettings(
-                                            form.firebaseConfig.value,
-                                            form.vapidKey.value,
-                                            form.notifyUrl.value,
-                                            form.groupId.value
-                                        );
-                                        if (ok) {
-                                            setShowNotificationSettings(false);
-                                            enableNotifications();
-                                        }
-                                    }} className="space-y-4">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-text-main dark:text-white mb-1">Firebase Config (JSON)</label>
-                                            <textarea
-                                                name="firebaseConfig"
-                                                rows="4"
-                                                defaultValue={localStorage.getItem('divvy_firebase_config') || ''}
-                                                placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","messagingSenderId":"...","appId":"..."}'
-                                                className="w-full bg-[#f6f8f7] dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-2.5 px-3 text-sm font-mono focus:ring-2 focus:ring-primary/50 transition-all text-text-main dark:text-white placeholder:text-slate-400"
-                                            />
-                                            <p className="text-xs text-slate-400 mt-1">From Firebase Console &gt; Project Settings &gt; General &gt; Your apps</p>
+                                    {notificationsEnabled ? (
+                                        <div className="space-y-4">
+                                            <div className="flex items-center gap-2 text-sm text-primary-dark dark:text-primary bg-primary/10 rounded-lg px-3 py-2">
+                                                <Icon name="check_circle" className="text-[18px]" />
+                                                <span className="font-medium">Notifications are on</span>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Group</label>
+                                                <p className="text-sm text-text-main dark:text-white font-mono bg-[#f6f8f7] dark:bg-black/20 rounded-lg px-3 py-2 border border-slate-200 dark:border-white/10">{notificationGroupId}</p>
+                                            </div>
+                                            <button
+                                                onClick={() => { disableNotifications(); setShowNotificationPanel(false); }}
+                                                className="w-full py-2.5 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl transition-colors text-sm border border-red-200 dark:border-red-800"
+                                            >
+                                                Turn Off Notifications
+                                            </button>
                                         </div>
-
-                                        <div>
-                                            <label className="block text-sm font-semibold text-text-main dark:text-white mb-1">VAPID Key</label>
-                                            <input
-                                                name="vapidKey"
-                                                type="text"
-                                                defaultValue={localStorage.getItem('divvy_vapid_key') || ''}
-                                                placeholder="BNx..."
-                                                className="w-full bg-[#f6f8f7] dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-2.5 px-3 text-sm font-mono focus:ring-2 focus:ring-primary/50 transition-all text-text-main dark:text-white placeholder:text-slate-400"
-                                            />
-                                            <p className="text-xs text-slate-400 mt-1">Firebase Console &gt; Project Settings &gt; Cloud Messaging &gt; Web Push certificates</p>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-semibold text-text-main dark:text-white mb-1">Cloud Function URL</label>
-                                            <input
-                                                name="notifyUrl"
-                                                type="url"
-                                                defaultValue={localStorage.getItem('divvy_notify_url') || ''}
-                                                placeholder="https://us-central1-yourproject.cloudfunctions.net/api"
-                                                className="w-full bg-[#f6f8f7] dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-2.5 px-3 text-sm font-mono focus:ring-2 focus:ring-primary/50 transition-all text-text-main dark:text-white placeholder:text-slate-400"
-                                            />
-                                            <p className="text-xs text-slate-400 mt-1">The deployed Cloud Function base URL (see functions/ directory)</p>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-semibold text-text-main dark:text-white mb-1">Notification Group ID</label>
-                                            <input
-                                                name="groupId"
-                                                type="text"
-                                                defaultValue={notificationGroupId || sheetId || ''}
-                                                placeholder="my-trip-2026"
-                                                className="w-full bg-[#f6f8f7] dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-primary/50 transition-all text-text-main dark:text-white placeholder:text-slate-400"
-                                            />
-                                            <p className="text-xs text-slate-400 mt-1">Shared group ID — all members must use the same ID to receive notifications</p>
-                                        </div>
-
-                                        <div className="flex gap-3 pt-2">
+                                    ) : (
+                                        <form onSubmit={e => {
+                                            e.preventDefault();
+                                            const gid = e.target.groupId.value.trim();
+                                            if (!gid) return;
+                                            setShowNotificationPanel(false);
+                                            enableNotifications(gid);
+                                        }} className="space-y-4">
+                                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                                Get notified when someone in your group adds an expense. Enter a shared group name to get started.
+                                            </p>
+                                            <div>
+                                                <label className="block text-sm font-semibold text-text-main dark:text-white mb-1">Group Name</label>
+                                                <input
+                                                    name="groupId"
+                                                    type="text"
+                                                    defaultValue={notificationGroupId || sheetId || ''}
+                                                    placeholder="e.g. europe-trip-2026"
+                                                    required
+                                                    autoFocus
+                                                    className="w-full bg-[#f6f8f7] dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-primary/50 transition-all text-text-main dark:text-white placeholder:text-slate-400"
+                                                />
+                                                <p className="text-xs text-slate-400 mt-1">Everyone in your trip uses the same group name</p>
+                                            </div>
                                             <button
                                                 type="submit"
-                                                className="flex-1 py-2.5 bg-primary hover:bg-primary-dark text-text-main font-bold rounded-xl transition-colors text-sm"
+                                                className="w-full py-2.5 bg-primary hover:bg-primary-dark text-text-main font-bold rounded-xl transition-colors text-sm"
                                             >
-                                                Save & Enable
+                                                Enable Notifications
                                             </button>
-                                            {notificationsEnabled && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => { disableNotifications(); setShowNotificationSettings(false); }}
-                                                    className="px-4 py-2.5 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl transition-colors text-sm border border-red-200 dark:border-red-800"
-                                                >
-                                                    Disable
-                                                </button>
-                                            )}
-                                        </div>
-                                    </form>
+                                        </form>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -2963,22 +2915,24 @@
                             )}
 
                             {/* Push Notification Bell */}
-                            <Tooltip text={notificationsEnabled ? "Notifications on" : "Enable notifications"}>
-                                <button
-                                    onClick={() => notificationsEnabled ? setShowNotificationSettings(true) : enableNotifications()}
-                                    className={`relative flex items-center justify-center size-9 rounded-lg transition-colors ${
-                                        notificationsEnabled
-                                            ? 'bg-primary/10 hover:bg-primary/20 text-primary-dark dark:text-primary border border-primary/30'
-                                            : 'bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/10'
-                                    }`}
-                                    title={notificationsEnabled ? "Notification settings" : "Enable push notifications"}
-                                >
-                                    <Icon name={notificationsEnabled ? "notifications_active" : "notifications_none"} className="text-[18px]" />
-                                    {notificationsEnabled && (
-                                        <span className="absolute -top-0.5 -right-0.5 size-2.5 bg-primary rounded-full border-2 border-white dark:border-[#1a2e22]"></span>
-                                    )}
-                                </button>
-                            </Tooltip>
+                            {isFirebaseConfigured() && (
+                                <Tooltip text={notificationsEnabled ? "Notifications on" : "Enable notifications"}>
+                                    <button
+                                        onClick={() => setShowNotificationPanel(true)}
+                                        className={`relative flex items-center justify-center size-9 rounded-lg transition-colors ${
+                                            notificationsEnabled
+                                                ? 'bg-primary/10 hover:bg-primary/20 text-primary-dark dark:text-primary border border-primary/30'
+                                                : 'bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/10'
+                                        }`}
+                                        title={notificationsEnabled ? "Notification settings" : "Enable push notifications"}
+                                    >
+                                        <Icon name={notificationsEnabled ? "notifications_active" : "notifications_none"} className="text-[18px]" />
+                                        {notificationsEnabled && (
+                                            <span className="absolute -top-0.5 -right-0.5 size-2.5 bg-primary rounded-full border-2 border-white dark:border-[#1a2e22]"></span>
+                                        )}
+                                    </button>
+                                </Tooltip>
+                            )}
 
                             <button
                                 onClick={playgroundMode ? exitPlayground : () => setShowResetConfirm(true)}

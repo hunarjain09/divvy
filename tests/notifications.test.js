@@ -70,9 +70,23 @@ describe('Push Notification Configuration', () => {
       expect(htmlContent).toContain('window.__swRegistration');
     });
 
+    test('has hardcoded Firebase config constants', () => {
+      expect(htmlContent).toContain('const FIREBASE_CONFIG');
+      expect(htmlContent).toContain('const FIREBASE_VAPID_KEY');
+      expect(htmlContent).toContain('const NOTIFICATION_FUNCTION_URL');
+    });
+
+    test('has isFirebaseConfigured check', () => {
+      expect(htmlContent).toContain('const isFirebaseConfigured');
+    });
+
+    test('bell icon only shows when Firebase is configured', () => {
+      expect(htmlContent).toContain('isFirebaseConfigured()');
+    });
+
     test('has notification state management', () => {
       expect(htmlContent).toContain('notificationsEnabled');
-      expect(htmlContent).toContain('showNotificationSettings');
+      expect(htmlContent).toContain('showNotificationPanel');
       expect(htmlContent).toContain('notificationGroupId');
     });
 
@@ -88,20 +102,15 @@ describe('Push Notification Configuration', () => {
       expect(htmlContent).toContain('const sendExpenseNotification');
     });
 
-    test('has saveNotificationSettings function', () => {
-      expect(htmlContent).toContain('const saveNotificationSettings');
-    });
-
     test('calls sendExpenseNotification in submitExpense', () => {
       expect(htmlContent).toContain('sendExpenseNotification(newExpense)');
     });
 
-    test('has notification settings modal', () => {
+    test('has notification panel with group name input', () => {
       expect(htmlContent).toContain('Push Notifications');
-      expect(htmlContent).toContain('Firebase Config (JSON)');
-      expect(htmlContent).toContain('VAPID Key');
-      expect(htmlContent).toContain('Cloud Function URL');
-      expect(htmlContent).toContain('Notification Group ID');
+      expect(htmlContent).toContain('Group Name');
+      expect(htmlContent).toContain('Enable Notifications');
+      expect(htmlContent).toContain('Turn Off Notifications');
     });
 
     test('has notification bell button in header', () => {
@@ -109,15 +118,20 @@ describe('Push Notification Configuration', () => {
       expect(htmlContent).toContain('notifications_none');
     });
 
-    test('reads notification config from localStorage', () => {
-      expect(htmlContent).toContain('divvy_firebase_config');
-      expect(htmlContent).toContain('divvy_vapid_key');
-      expect(htmlContent).toContain('divvy_notify_url');
+    test('persists notification group and enabled state', () => {
       expect(htmlContent).toContain('divvy_notification_group');
+      expect(htmlContent).toContain('divvy_notifications_enabled');
     });
 
     test('auto-initializes notifications if previously enabled', () => {
-      expect(htmlContent).toContain('divvy_notifications_enabled');
+      expect(htmlContent).toContain('if (notificationsEnabled && isFirebaseConfigured()');
+    });
+
+    test('uses NOTIFICATION_FUNCTION_URL for API calls', () => {
+      expect(htmlContent).toContain('NOTIFICATION_FUNCTION_URL');
+      expect(htmlContent).toContain('/subscribe');
+      expect(htmlContent).toContain('/unsubscribe');
+      expect(htmlContent).toContain('/notify');
     });
   });
 
