@@ -444,7 +444,7 @@
         // Set these once as the project owner. Get values from:
         //   Firebase Console > Project Settings > General > Your apps (Web)
         //   Firebase Console > Project Settings > Cloud Messaging > Web Push certificates
-        //   Deploy functions/ and use the Cloud Function base URL
+        //   Deploy apps-script/ via clasp and use the web app URL
         const FIREBASE_CONFIG = {
             // Replace with your Firebase project config
             apiKey: '',
@@ -455,9 +455,9 @@
             appId: ''
         };
         const FIREBASE_VAPID_KEY = ''; // Web Push certificate key pair
-        const NOTIFICATION_FUNCTION_URL = ''; // e.g. https://us-central1-yourproject.cloudfunctions.net
+        const APPS_SCRIPT_URL = ''; // Deployed Apps Script web app URL (e.g. https://script.google.com/macros/s/.../exec)
 
-        const isFirebaseConfigured = () => Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_VAPID_KEY && NOTIFICATION_FUNCTION_URL);
+        const isNotificationsConfigured = () => Boolean(FIREBASE_CONFIG.apiKey && FIREBASE_VAPID_KEY && APPS_SCRIPT_URL);
 
         // --- Dexie Database Setup ---
         const db = new Dexie('TripExpenseDB');
@@ -664,9 +664,6 @@
                 return localStorage.getItem('divvy_notifications_enabled') === 'true';
             });
             const [showNotificationPanel, setShowNotificationPanel] = useState(false);
-            const [notificationGroupId, setNotificationGroupId] = useState(() =>
-                localStorage.getItem('divvy_notification_group') || ''
-            );
             const fcmTokenRef = useRef(null);
             const messagingRef = useRef(null);
 
@@ -2266,10 +2263,12 @@
             };
 
             // --- Push Notification Helpers ---
+            // Uses FCM Topics via Apps Script — the Sheet ID is the topic/group.
+            // No separate group ID needed; sheet editors = notification group.
+
             const initFirebaseMessaging = async () => {
                 if (messagingRef.current) return messagingRef.current;
-                if (!isFirebaseConfigured()) return null;
-
+                if (!isNotificationsConfigured()) return null;
                 try {
                     if (typeof firebase !== 'undefined') {
                         if (!firebase.apps.length) {
@@ -2285,19 +2284,38 @@
                 return null;
             };
 
-            const enableNotifications = async (groupId) => {
-                const gid = groupId || notificationGroupId;
+            // Store user email in Cache API so service worker can "mute myself"
+            const storeEmailForServiceWorker = async (email) => {
+                try {
+                    const cache = await caches.open('divvy-user');
+                    await cache.put('user-email', new Response(email));
+                } catch (err) {
+                    T.warn('notifications', 'Failed to cache user email for SW', { error: err.message });
+                }
+            };
+
+            const callAppsScript = async (action, extra = {}) => {
+                if (!accessToken || !sheetId) return { error: 'Not signed in or no sheet' };
+                const resp = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, accessToken, sheetId, ...extra }),
+                    redirect: 'follow'
+                });
+                return resp.json();
+            };
+
+            const enableNotifications = async () => {
                 const span = T.startSpan('enableNotifications', 'notifications');
                 try {
-                    if (!isFirebaseConfigured()) {
-                        T.warn('notifications', 'Firebase not configured by project owner');
+                    if (!isNotificationsConfigured()) {
+                        T.warn('notifications', 'Notifications not configured by project owner');
                         span.end({ configured: false });
                         return;
                     }
-                    if (!gid) {
-                        T.warn('notifications', 'No group ID — opening panel');
-                        setShowNotificationPanel(true);
-                        span.end({ missingGroup: true });
+                    if (!sheetId || !accessToken) {
+                        T.warn('notifications', 'Must connect to a sheet first');
+                        span.end({ missingSheet: true });
                         return;
                     }
 
@@ -2320,23 +2338,32 @@
 
                     const token = await messaging.getToken(tokenOptions);
                     T.info('notifications', 'FCM token obtained', { tokenPrefix: token.substring(0, 20) + '...' });
-
                     fcmTokenRef.current = token;
+
+                    // Subscribe FCM token to the sheet's topic via Apps Script
+                    const result = await callAppsScript('subscribe', { fcmToken: token });
+                    if (result.error) {
+                        T.error('notifications', 'Subscribe failed', result);
+                        span.end({ error: result.error });
+                        return;
+                    }
+
                     setNotificationsEnabled(true);
-                    setNotificationGroupId(gid);
                     localStorage.setItem('divvy_notifications_enabled', 'true');
-                    localStorage.setItem('divvy_notification_group', gid);
 
-                    // Subscribe to notification group
-                    await subscribeToNotificationGroup(token, gid);
+                    // Store email for "mute myself" in service worker
+                    if (googleUser?.email) {
+                        await storeEmailForServiceWorker(googleUser.email);
+                    }
 
-                    // Handle foreground messages
+                    // Handle foreground messages (mute-myself on main thread too)
                     messaging.onMessage((payload) => {
                         T.info('notifications', 'Foreground message', payload);
-                        const n = payload.notification || payload.data || {};
+                        const d = payload.data || {};
+                        if (d.sender === googleUser?.email) return; // Mute myself
                         if (Notification.permission === 'granted') {
-                            new Notification(n.title || 'Divvy', {
-                                body: n.body || 'New activity',
+                            new Notification(d.title || 'Divvy', {
+                                body: d.body || 'New activity',
                                 icon: 'icons/icon-192x192.png'
                             });
                         }
@@ -2351,15 +2378,11 @@
 
             const disableNotifications = async () => {
                 try {
-                    if (fcmTokenRef.current && notificationGroupId) {
-                        await fetch(`${NOTIFICATION_FUNCTION_URL}/unsubscribe`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ groupId: notificationGroupId, token: fcmTokenRef.current })
-                        });
+                    if (fcmTokenRef.current && sheetId && accessToken) {
+                        await callAppsScript('unsubscribe', { fcmToken: fcmTokenRef.current });
                     }
                 } catch (err) {
-                    T.error('notifications', 'Unsubscribe request failed', { error: err.message });
+                    T.error('notifications', 'Unsubscribe failed', { error: err.message });
                 }
                 setNotificationsEnabled(false);
                 fcmTokenRef.current = null;
@@ -2368,35 +2391,14 @@
                 T.info('notifications', 'Notifications disabled');
             };
 
-            const subscribeToNotificationGroup = async (token, groupId) => {
-                try {
-                    await fetch(`${NOTIFICATION_FUNCTION_URL}/subscribe`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            groupId,
-                            token,
-                            userName: googleUser?.name || 'Someone'
-                        })
-                    });
-                    T.info('notifications', 'Subscribed to group', { groupId });
-                } catch (err) {
-                    T.error('notifications', 'Subscribe failed', { error: err.message });
-                }
-            };
-
             const sendExpenseNotification = async (expense) => {
-                if (!notificationsEnabled || !notificationGroupId || !fcmTokenRef.current) return;
+                if (!notificationsEnabled || !sheetId || !accessToken) return;
                 try {
-                    await fetch(`${NOTIFICATION_FUNCTION_URL}/notify`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            groupId: notificationGroupId,
-                            senderToken: fcmTokenRef.current,
+                    await callAppsScript('notify', {
+                        message: {
                             title: 'New Expense Added',
                             body: `${expense.payer} paid ${formatMoney(expense.amount)} for ${expense.description}`
-                        })
+                        }
                     });
                     T.info('notifications', 'Expense notification sent');
                 } catch (err) {
@@ -2404,12 +2406,12 @@
                 }
             };
 
-            // Auto-initialize notifications if previously enabled
+            // Auto-initialize notifications if previously enabled and sheet connected
             useEffect(() => {
-                if (notificationsEnabled && isFirebaseConfigured() && !fcmTokenRef.current) {
+                if (notificationsEnabled && isNotificationsConfigured() && sheetId && accessToken && !fcmTokenRef.current) {
                     enableNotifications();
                 }
-            }, []);
+            }, [sheetId, accessToken]);
 
             const submitExpense = async () => {
                 const val = parseFloat(amount);
@@ -2780,10 +2782,9 @@
                                                 <Icon name="check_circle" className="text-[18px]" />
                                                 <span className="font-medium">Notifications are on</span>
                                             </div>
-                                            <div>
-                                                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Group</label>
-                                                <p className="text-sm text-text-main dark:text-white font-mono bg-[#f6f8f7] dark:bg-black/20 rounded-lg px-3 py-2 border border-slate-200 dark:border-white/10">{notificationGroupId}</p>
-                                            </div>
+                                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                                You'll be notified when someone adds an expense to this sheet.
+                                            </p>
                                             <button
                                                 onClick={() => { disableNotifications(); setShowNotificationPanel(false); }}
                                                 className="w-full py-2.5 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl transition-colors text-sm border border-red-200 dark:border-red-800"
@@ -2792,36 +2793,17 @@
                                             </button>
                                         </div>
                                     ) : (
-                                        <form onSubmit={e => {
-                                            e.preventDefault();
-                                            const gid = e.target.groupId.value.trim();
-                                            if (!gid) return;
-                                            setShowNotificationPanel(false);
-                                            enableNotifications(gid);
-                                        }} className="space-y-4">
+                                        <div className="space-y-4">
                                             <p className="text-sm text-slate-500 dark:text-slate-400">
-                                                Get notified when someone in your group adds an expense. Enter a shared group name to get started.
+                                                Get notified when someone adds an expense to this sheet. All editors of the sheet can subscribe.
                                             </p>
-                                            <div>
-                                                <label className="block text-sm font-semibold text-text-main dark:text-white mb-1">Group Name</label>
-                                                <input
-                                                    name="groupId"
-                                                    type="text"
-                                                    defaultValue={notificationGroupId || sheetId || ''}
-                                                    placeholder="e.g. europe-trip-2026"
-                                                    required
-                                                    autoFocus
-                                                    className="w-full bg-[#f6f8f7] dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-primary/50 transition-all text-text-main dark:text-white placeholder:text-slate-400"
-                                                />
-                                                <p className="text-xs text-slate-400 mt-1">Everyone in your trip uses the same group name</p>
-                                            </div>
                                             <button
-                                                type="submit"
+                                                onClick={() => { enableNotifications(); setShowNotificationPanel(false); }}
                                                 className="w-full py-2.5 bg-primary hover:bg-primary-dark text-text-main font-bold rounded-xl transition-colors text-sm"
                                             >
                                                 Enable Notifications
                                             </button>
-                                        </form>
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -2915,7 +2897,7 @@
                             )}
 
                             {/* Push Notification Bell */}
-                            {isFirebaseConfigured() && (
+                            {isNotificationsConfigured() && sheetId && (
                                 <Tooltip text={notificationsEnabled ? "Notifications on" : "Enable notifications"}>
                                     <button
                                         onClick={() => setShowNotificationPanel(true)}

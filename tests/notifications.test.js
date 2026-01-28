@@ -49,6 +49,16 @@ describe('Push Notification Configuration', () => {
     test('caches Firebase SDK resources', () => {
       expect(swContent).toContain("url.hostname.includes('www.gstatic.com')");
     });
+
+    test('has mute-myself logic via Cache API', () => {
+      expect(swContent).toContain('getCurrentUserEmail');
+      expect(swContent).toContain("caches.open('divvy-user')");
+      expect(swContent).toContain('Muting own notification');
+    });
+
+    test('compares sender email to current user for muting', () => {
+      expect(swContent).toContain('myEmail === senderEmail');
+    });
   });
 
   describe('Manifest - FCM Support', () => {
@@ -70,24 +80,23 @@ describe('Push Notification Configuration', () => {
       expect(htmlContent).toContain('window.__swRegistration');
     });
 
-    test('has hardcoded Firebase config constants', () => {
+    test('has hardcoded Firebase and Apps Script config constants', () => {
       expect(htmlContent).toContain('const FIREBASE_CONFIG');
       expect(htmlContent).toContain('const FIREBASE_VAPID_KEY');
-      expect(htmlContent).toContain('const NOTIFICATION_FUNCTION_URL');
+      expect(htmlContent).toContain('const APPS_SCRIPT_URL');
     });
 
-    test('has isFirebaseConfigured check', () => {
-      expect(htmlContent).toContain('const isFirebaseConfigured');
+    test('has isNotificationsConfigured check', () => {
+      expect(htmlContent).toContain('const isNotificationsConfigured');
     });
 
-    test('bell icon only shows when Firebase is configured', () => {
-      expect(htmlContent).toContain('isFirebaseConfigured()');
+    test('bell icon only shows when configured and sheet connected', () => {
+      expect(htmlContent).toContain('isNotificationsConfigured() && sheetId');
     });
 
     test('has notification state management', () => {
       expect(htmlContent).toContain('notificationsEnabled');
       expect(htmlContent).toContain('showNotificationPanel');
-      expect(htmlContent).toContain('notificationGroupId');
     });
 
     test('has enableNotifications function', () => {
@@ -106,9 +115,8 @@ describe('Push Notification Configuration', () => {
       expect(htmlContent).toContain('sendExpenseNotification(newExpense)');
     });
 
-    test('has notification panel with group name input', () => {
+    test('has notification panel with enable/disable controls', () => {
       expect(htmlContent).toContain('Push Notifications');
-      expect(htmlContent).toContain('Group Name');
       expect(htmlContent).toContain('Enable Notifications');
       expect(htmlContent).toContain('Turn Off Notifications');
     });
@@ -118,77 +126,99 @@ describe('Push Notification Configuration', () => {
       expect(htmlContent).toContain('notifications_none');
     });
 
-    test('persists notification group and enabled state', () => {
-      expect(htmlContent).toContain('divvy_notification_group');
+    test('persists notification enabled state', () => {
       expect(htmlContent).toContain('divvy_notifications_enabled');
     });
 
     test('auto-initializes notifications if previously enabled', () => {
-      expect(htmlContent).toContain('if (notificationsEnabled && isFirebaseConfigured()');
+      expect(htmlContent).toContain('if (notificationsEnabled && isNotificationsConfigured()');
     });
 
-    test('uses NOTIFICATION_FUNCTION_URL for API calls', () => {
-      expect(htmlContent).toContain('NOTIFICATION_FUNCTION_URL');
-      expect(htmlContent).toContain('/subscribe');
-      expect(htmlContent).toContain('/unsubscribe');
-      expect(htmlContent).toContain('/notify');
+    test('has callAppsScript helper for API calls', () => {
+      expect(htmlContent).toContain('const callAppsScript');
+      expect(htmlContent).toContain('APPS_SCRIPT_URL');
+    });
+
+    test('calls Apps Script with subscribe, unsubscribe, and notify actions', () => {
+      expect(htmlContent).toContain("callAppsScript('subscribe'");
+      expect(htmlContent).toContain("callAppsScript('unsubscribe'");
+      expect(htmlContent).toContain("callAppsScript('notify'");
+    });
+
+    test('stores user email in Cache API for service worker mute-myself', () => {
+      expect(htmlContent).toContain('const storeEmailForServiceWorker');
+      expect(htmlContent).toContain("caches.open('divvy-user')");
     });
   });
 
-  describe('Cloud Function', () => {
-    let functionCode;
+  describe('Apps Script Backend', () => {
+    let scriptCode;
 
     beforeAll(() => {
-      functionCode = fs.readFileSync(path.join(process.cwd(), 'functions', 'index.js'), 'utf8');
+      scriptCode = fs.readFileSync(path.join(process.cwd(), 'apps-script', 'Code.js'), 'utf8');
     });
 
-    test('functions/index.js exists', () => {
-      expect(fs.existsSync(path.join(process.cwd(), 'functions', 'index.js'))).toBe(true);
+    test('apps-script/Code.js exists', () => {
+      expect(fs.existsSync(path.join(process.cwd(), 'apps-script', 'Code.js'))).toBe(true);
     });
 
-    test('has subscribe endpoint', () => {
-      expect(functionCode).toContain('exports.subscribe');
+    test('has doPost entry point', () => {
+      expect(scriptCode).toContain('function doPost(e)');
     });
 
-    test('has unsubscribe endpoint', () => {
-      expect(functionCode).toContain('exports.unsubscribe');
+    test('verifies caller identity via Google tokeninfo', () => {
+      expect(scriptCode).toContain('verifyAccessToken');
+      expect(scriptCode).toContain('oauth2.googleapis.com/tokeninfo');
     });
 
-    test('has notify endpoint', () => {
-      expect(functionCode).toContain('exports.notify');
+    test('verifies sheet access with caller token', () => {
+      expect(scriptCode).toContain('verifySheetAccess');
+      expect(scriptCode).toContain('sheets.googleapis.com/v4/spreadsheets');
     });
 
-    test('uses Firebase Admin SDK', () => {
-      expect(functionCode).toContain('firebase-admin');
-      expect(functionCode).toContain('admin.initializeApp');
+    test('has rate limiting via CacheService', () => {
+      expect(scriptCode).toContain('CacheService.getScriptCache()');
+      expect(scriptCode).toContain('rate_');
     });
 
-    test('uses Firestore for token storage', () => {
-      expect(functionCode).toContain('admin.firestore()');
-      expect(functionCode).toContain('notificationGroups');
+    test('subscribes to FCM topic via IID API', () => {
+      expect(scriptCode).toContain('iid.googleapis.com/iid/v1:batchAdd');
+      expect(scriptCode).toContain('subscribeToTopic');
     });
 
-    test('sends FCM via sendEachForMulticast', () => {
-      expect(functionCode).toContain('sendEachForMulticast');
+    test('unsubscribes from FCM topic via IID API', () => {
+      expect(scriptCode).toContain('iid.googleapis.com/iid/v1:batchRemove');
+      expect(scriptCode).toContain('unsubscribeFromTopic');
     });
 
-    test('excludes sender from notifications', () => {
-      expect(functionCode).toContain('data.token !== senderToken');
+    test('sends notifications via FCM v1 API', () => {
+      expect(scriptCode).toContain('fcm.googleapis.com/v1/projects');
+      expect(scriptCode).toContain('messages:send');
     });
 
-    test('cleans up stale tokens', () => {
-      expect(functionCode).toContain('registration-token-not-registered');
-      expect(functionCode).toContain('invalid-registration-token');
+    test('includes sender email in notification data for mute-myself', () => {
+      expect(scriptCode).toContain('sender: senderEmail');
     });
 
-    test('sets CORS headers', () => {
-      expect(functionCode).toContain('Access-Control-Allow-Origin');
+    test('sanitizes topic names for FCM', () => {
+      expect(scriptCode).toContain('sanitizeTopic');
     });
 
-    test('has package.json with required dependencies', () => {
-      const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'functions', 'package.json'), 'utf8'));
-      expect(pkg.dependencies).toHaveProperty('firebase-admin');
-      expect(pkg.dependencies).toHaveProperty('firebase-functions');
+    test('uses ScriptApp OAuth token for FCM operations', () => {
+      expect(scriptCode).toContain('ScriptApp.getOAuthToken()');
+    });
+
+    test('dispatches subscribe, unsubscribe, and notify actions', () => {
+      expect(scriptCode).toContain('case "subscribe"');
+      expect(scriptCode).toContain('case "unsubscribe"');
+      expect(scriptCode).toContain('case "notify"');
+    });
+
+    test('has appsscript.json manifest with required OAuth scopes', () => {
+      const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'apps-script', 'appsscript.json'), 'utf8'));
+      expect(manifest.oauthScopes).toContain('https://www.googleapis.com/auth/firebase.messaging');
+      expect(manifest.oauthScopes).toContain('https://www.googleapis.com/auth/script.external_request');
+      expect(manifest.webapp.access).toBe('ANYONE');
     });
   });
 });

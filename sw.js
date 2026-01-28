@@ -143,6 +143,19 @@ self.addEventListener('fetch', (event) => {
 });
 
 // --- Push Notification Handling ---
+
+// Read the current user's email from the Cache API (set by the main thread).
+// Used for "mute myself" — don't show notifications for your own expenses.
+async function getCurrentUserEmail() {
+  try {
+    const cache = await caches.open('divvy-user');
+    const response = await cache.match('user-email');
+    return response ? await response.text() : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 self.addEventListener('push', (event) => {
   SW.info('push', '📬 Push notification received');
 
@@ -164,18 +177,31 @@ self.addEventListener('push', (event) => {
   const data = payload.data || {};
 
   const title = notification.title || data.title || 'Divvy';
-  const options = {
-    body: notification.body || data.body || 'New activity in your group',
-    icon: notification.icon || data.icon || './icons/icon-192x192.png',
-    badge: './icons/icon-96x96.png',
-    data: { url: data.url || './', ...data },
-    tag: data.tag || 'divvy-expense',
-    renotify: true,
-    requireInteraction: false
-  };
+  const body = notification.body || data.body || 'New activity in your group';
+  const senderEmail = data.sender || '';
 
-  SW.info('push', `Showing notification: "${title}"`, options);
-  event.waitUntil(self.registration.showNotification(title, options));
+  // "Mute Myself" — suppress notification if the current user sent it
+  const showPromise = getCurrentUserEmail().then(myEmail => {
+    if (myEmail && senderEmail && myEmail === senderEmail) {
+      SW.info('push', 'Muting own notification', { sender: senderEmail });
+      return;
+    }
+
+    const options = {
+      body,
+      icon: notification.icon || data.icon || './icons/icon-192x192.png',
+      badge: './icons/icon-96x96.png',
+      data: { url: data.url || './', ...data },
+      tag: data.tag || 'divvy-expense',
+      renotify: true,
+      requireInteraction: false
+    };
+
+    SW.info('push', `Showing notification: "${title}"`, options);
+    return self.registration.showNotification(title, options);
+  });
+
+  event.waitUntil(showPromise);
 });
 
 // Handle notification click — focus existing window or open new one
