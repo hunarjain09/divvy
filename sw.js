@@ -121,7 +121,8 @@ self.addEventListener('fetch', (event) => {
                             url.hostname.includes('cdn.jsdelivr.net') ||
                             url.hostname.includes('fonts.googleapis.com') ||
                             url.hostname.includes('fonts.gstatic.com') ||
-                            url.hostname.includes('accounts.google.com');
+                            url.hostname.includes('accounts.google.com') ||
+                            url.hostname.includes('www.gstatic.com');
 
           if (shouldCache) {
             const responseClone = response.clone();
@@ -137,6 +138,63 @@ self.addEventListener('fetch', (event) => {
       .catch(() => {
         // Fall back to cache
         return caches.match(event.request);
+      })
+  );
+});
+
+// --- Push Notification Handling ---
+self.addEventListener('push', (event) => {
+  SW.info('push', '📬 Push notification received');
+
+  if (!event.data) {
+    SW.warn('push', 'Push event has no data');
+    return;
+  }
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch (e) {
+    SW.error('push', 'Failed to parse push data', { error: e.message });
+    payload = { notification: { title: 'Divvy', body: event.data.text() } };
+  }
+
+  // Support both FCM notification and data-only payloads
+  const notification = payload.notification || {};
+  const data = payload.data || {};
+
+  const title = notification.title || data.title || 'Divvy';
+  const options = {
+    body: notification.body || data.body || 'New activity in your group',
+    icon: notification.icon || data.icon || './icons/icon-192x192.png',
+    badge: './icons/icon-96x96.png',
+    data: { url: data.url || './', ...data },
+    tag: data.tag || 'divvy-expense',
+    renotify: true,
+    requireInteraction: false
+  };
+
+  SW.info('push', `Showing notification: "${title}"`, options);
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Handle notification click — focus existing window or open new one
+self.addEventListener('notificationclick', (event) => {
+  SW.info('push', 'Notification clicked', { action: event.action });
+  event.notification.close();
+
+  if (event.action === 'dismiss') return;
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(clientList => {
+        for (const client of clientList) {
+          if ('focus' in client) {
+            return client.focus();
+          }
+        }
+        const url = event.notification.data?.url || './';
+        return clients.openWindow(url);
       })
   );
 });
