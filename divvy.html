@@ -443,14 +443,46 @@
             expenses: '++id, date',
             strangers: '&pair'
         });
+        // v2: Copy expenses into a temp table with UUID ids.
+        // We cannot change the primary key of an existing table directly
+        // (Dexie throws UpgradeError), so we stage the data here first.
         db.version(2).stores({
             participants: '&name',
-            expenses: 'id, date', // UUID primary key (no auto-increment)
+            expenses: '++id, date', // unchanged — pk change comes later
+            _exp_tmp: 'id, date',   // temp table with UUID pk
             strangers: '&pair'
-        }).upgrade(tx => {
-            return tx.table('expenses').toCollection().modify(expense => {
-                expense.id = generateId();
-            });
+        }).upgrade(async tx => {
+            const all = await tx.table('expenses').toArray();
+            if (all.length > 0) {
+                const migrated = all.map(e => ({ ...e, id: generateId() }));
+                await tx.table('_exp_tmp').bulkAdd(migrated);
+            }
+        });
+        // v3: Drop the old expenses table (auto-increment pk).
+        db.version(3).stores({
+            participants: '&name',
+            expenses: null,
+            _exp_tmp: 'id, date',
+            strangers: '&pair'
+        });
+        // v4: Recreate expenses with UUID primary key and restore migrated data.
+        db.version(4).stores({
+            participants: '&name',
+            expenses: 'id, date', // UUID primary key (no auto-increment)
+            _exp_tmp: 'id, date',
+            strangers: '&pair'
+        }).upgrade(async tx => {
+            const all = await tx.table('_exp_tmp').toArray();
+            if (all.length > 0) {
+                await tx.table('expenses').bulkAdd(all);
+            }
+        });
+        // v5: Drop the temporary migration table.
+        db.version(5).stores({
+            participants: '&name',
+            expenses: 'id, date',
+            _exp_tmp: null,
+            strangers: '&pair'
         });
 
         // --- Playground Database (sandboxed, separate from real data) ---
