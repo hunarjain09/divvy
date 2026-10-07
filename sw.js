@@ -29,7 +29,7 @@ const SW = (() => {
   };
 })();
 
-const CACHE_NAME = 'divvy-v4';
+const CACHE_NAME = 'divvy-v5';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
