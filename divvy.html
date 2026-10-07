@@ -486,14 +486,31 @@
         );
 
         // Swipe left -> onSwipeLeft (edit), swipe right -> onSwipeRight (delete). Touch only.
-        const SwipeRow = ({ onSwipeLeft, onSwipeRight, className = "", children }) => {
+        const SwipeRow = ({ onSwipeLeft, onSwipeRight, hint = false, onHintDone, className = "", children }) => {
             const THRESHOLD = 80;
             const MAX = 120;
             const [dx, setDx] = useState(0);
             const [dragging, setDragging] = useState(false);
             const start = useRef({ x: 0, y: 0, locked: null });
+            const hintTimers = useRef([]);
+
+            const stopHint = () => {
+                hintTimers.current.forEach(clearTimeout);
+                hintTimers.current = [];
+                if (hint && onHintDone) onHintDone();
+            };
+
+            // First-run demo: nudge the row left (edit), then right (delete), then settle.
+            useEffect(() => {
+                if (!hint) return;
+                const steps = [[600, -70], [1300, 70], [2000, 0]];
+                hintTimers.current = steps.map(([t, v]) => setTimeout(() => setDx(v), t));
+                hintTimers.current.push(setTimeout(() => onHintDone && onHintDone(), 2600));
+                return () => hintTimers.current.forEach(clearTimeout);
+            }, [hint]);
 
             const onTouchStart = (e) => {
+                if (hint) stopHint();
                 const t = e.touches[0];
                 start.current = { x: t.clientX, y: t.clientY, locked: null };
             };
@@ -546,6 +563,14 @@
                     >
                         {children}
                     </div>
+                    {hint && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="flex items-center gap-2 bg-slate-900/85 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg">
+                                <Icon name="swipe" className="text-[18px]" />
+                                <span>Swipe left to edit · right to delete</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
@@ -641,6 +666,16 @@
             const [description, setDescription] = useState('');
             const [selectedBeneficiaries, setSelectedBeneficiaries] = useState(new Set());
             const [editingId, setEditingId] = useState(null);
+            const [showSwipeHint, setShowSwipeHint] = useState(() => {
+                try {
+                    const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+                    return touch && !localStorage.getItem('divvy-swipe-hint-seen');
+                } catch (e) { return false; }
+            });
+            const dismissSwipeHint = () => {
+                setShowSwipeHint(false);
+                try { localStorage.setItem('divvy-swipe-hint-seen', '1'); } catch (e) { }
+            };
 
             // Solver
             const [isSolverLoaded, setIsSolverLoaded] = useState(false);
@@ -1060,8 +1095,8 @@
                                                         <div className="col-span-3 text-right">Payer & Amount</div>
                                                     </div>
                                                     <div className="divide-y divide-[#dce5df] dark:divide-white/5">
-                                                        {visibleExpenses.map((exp) => (
-                                                            <SwipeRow key={exp.id} onSwipeLeft={() => startEditExpense(exp)} onSwipeRight={() => deleteExpense(exp)}>
+                                                        {visibleExpenses.map((exp, idx) => (
+                                                            <SwipeRow key={exp.id} hint={showSwipeHint && idx === 0} onHintDone={dismissSwipeHint} onSwipeLeft={() => startEditExpense(exp)} onSwipeRight={() => deleteExpense(exp)}>
                                                             <div className="grid grid-cols-12 px-3 sm:px-6 py-3 sm:py-4 items-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                                                                 <div className="col-span-2 flex flex-col">
                                                                     <span className="font-bold text-text-main dark:text-white">{formatDate(exp.date)}</span>
