@@ -485,6 +485,71 @@
             </span>
         );
 
+        // Swipe left -> onSwipeLeft (edit), swipe right -> onSwipeRight (delete). Touch only.
+        const SwipeRow = ({ onSwipeLeft, onSwipeRight, className = "", children }) => {
+            const THRESHOLD = 80;
+            const MAX = 120;
+            const [dx, setDx] = useState(0);
+            const [dragging, setDragging] = useState(false);
+            const start = useRef({ x: 0, y: 0, locked: null });
+
+            const onTouchStart = (e) => {
+                const t = e.touches[0];
+                start.current = { x: t.clientX, y: t.clientY, locked: null };
+            };
+            const onTouchMove = (e) => {
+                const t = e.touches[0];
+                const mx = t.clientX - start.current.x;
+                const my = t.clientY - start.current.y;
+                if (start.current.locked === null) {
+                    if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
+                    start.current.locked = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+                }
+                if (start.current.locked !== 'x') return;
+                setDragging(true);
+                setDx(Math.max(-MAX, Math.min(MAX, mx)));
+            };
+            const onTouchEnd = () => {
+                const wasX = start.current.locked === 'x';
+                const final = dx;
+                setDragging(false);
+                setDx(0);
+                if (!wasX) return;
+                if (final <= -THRESHOLD) onSwipeLeft();
+                else if (final >= THRESHOLD) onSwipeRight();
+            };
+
+            const armed = Math.abs(dx) >= THRESHOLD;
+            return (
+                <div className={`relative overflow-hidden ${className}`}>
+                    {dx > 0 && (
+                        <div className={`absolute inset-y-0 left-0 w-full flex items-center justify-start pl-6 text-white bg-red-500 ${armed ? '' : 'opacity-80'}`}>
+                            <Icon name="delete" />
+                        </div>
+                    )}
+                    {dx < 0 && (
+                        <div className={`absolute inset-y-0 left-0 w-full flex items-center justify-end pr-6 text-[#111814] bg-primary ${armed ? '' : 'opacity-80'}`}>
+                            <Icon name="edit" />
+                        </div>
+                    )}
+                    <div
+                        className="relative bg-white dark:bg-[#1a2e22]"
+                        style={{
+                            transform: `translateX(${dx}px)`,
+                            transition: dragging ? 'none' : 'transform 200ms ease-out',
+                            touchAction: 'pan-y'
+                        }}
+                        onTouchStart={onTouchStart}
+                        onTouchMove={onTouchMove}
+                        onTouchEnd={onTouchEnd}
+                        onTouchCancel={onTouchEnd}
+                    >
+                        {children}
+                    </div>
+                </div>
+            );
+        };
+
         const BenefitItem = ({ icon, title, description }) => (
             <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                 <div className="flex-shrink-0 mt-1">
@@ -996,7 +1061,8 @@
                                                     </div>
                                                     <div className="divide-y divide-[#dce5df] dark:divide-white/5">
                                                         {visibleExpenses.map((exp) => (
-                                                            <div key={exp.id} className="grid grid-cols-12 px-3 sm:px-6 py-3 sm:py-4 items-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                                                            <SwipeRow key={exp.id} onSwipeLeft={() => startEditExpense(exp)} onSwipeRight={() => deleteExpense(exp)}>
+                                                            <div className="grid grid-cols-12 px-3 sm:px-6 py-3 sm:py-4 items-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                                                                 <div className="col-span-2 flex flex-col">
                                                                     <span className="font-bold text-text-main dark:text-white">{formatDate(exp.date)}</span>
                                                                     <span className="text-xs text-slate-400">{formatTime(exp.date)}</span>
@@ -1042,7 +1108,7 @@
                                                                     <span className="text-[10px] text-red-400 font-medium mt-0.5">
                                                                         Split: {formatMoney(exp.amount / exp.beneficiaries.length)} ea.
                                                                     </span>
-                                                                    <div className="flex gap-1 mt-1">
+                                                                    <div className="hidden sm:flex gap-1 mt-1">
                                                                         <button
                                                                             onClick={() => startEditExpense(exp)}
                                                                             aria-label="Edit expense"
@@ -1060,6 +1126,7 @@
                                                                     </div>
                                                                 </div>
                                                             </div>
+                                                            </SwipeRow>
                                                         ))}
                                                     </div>
                                                 </div>
