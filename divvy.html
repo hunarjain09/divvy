@@ -493,6 +493,7 @@
             const [dragging, setDragging] = useState(false);
             const start = useRef({ x: 0, y: 0, locked: null });
             const hintTimers = useRef([]);
+            const rowRef = useRef(null);
 
             const stopHint = () => {
                 hintTimers.current.forEach(clearTimeout);
@@ -503,6 +504,10 @@
             // First-run demo: nudge the row left (edit), then right (delete), then settle.
             useEffect(() => {
                 if (!hint) return;
+                // On phones the list can start below the fold; make sure the demo is seen.
+                if (rowRef.current && rowRef.current.scrollIntoView) {
+                    rowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                }
                 const steps = [[600, -70], [1300, 70], [2000, 0]];
                 hintTimers.current = steps.map(([t, v]) => setTimeout(() => setDx(v), t));
                 hintTimers.current.push(setTimeout(() => onHintDone && onHintDone(), 2600));
@@ -538,7 +543,7 @@
 
             const armed = Math.abs(dx) >= THRESHOLD;
             return (
-                <div className={`relative overflow-hidden ${className}`}>
+                <div ref={rowRef} className={`relative overflow-hidden ${className}`}>
                     {dx > 0 && (
                         <div className={`absolute inset-y-0 left-0 w-full flex items-center justify-start pl-6 text-white bg-red-500 ${armed ? '' : 'opacity-80'}`}>
                             <Icon name="delete" />
