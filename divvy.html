@@ -575,6 +575,7 @@
             const [amount, setAmount] = useState('');
             const [description, setDescription] = useState('');
             const [selectedBeneficiaries, setSelectedBeneficiaries] = useState(new Set());
+            const [editingId, setEditingId] = useState(null);
 
             // Solver
             const [isSolverLoaded, setIsSolverLoaded] = useState(false);
@@ -965,9 +966,17 @@
                                                 disabled={!amount || !payer || selectedBeneficiaries.size === 0}
                                                 className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-[#111814] text-lg font-bold py-4 rounded-xl transition-all shadow-md hover:shadow-lg active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed mt-4 mb-2"
                                             >
-                                                <Icon name="add_circle" />
-                                                Save Expense
+                                                <Icon name={editingId ? "check_circle" : "add_circle"} />
+                                                {editingId ? 'Update Expense' : 'Save Expense'}
                                             </button>
+                                            {editingId && (
+                                                <button
+                                                    onClick={cancelEditExpense}
+                                                    className="w-full text-sm font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 -mt-2 mb-2"
+                                                >
+                                                    Cancel edit
+                                                </button>
+                                            )}
                                         </div>
                                     ) : (
                                         // HISTORY VIEW
@@ -1033,6 +1042,22 @@
                                                                     <span className="text-[10px] text-red-400 font-medium mt-0.5">
                                                                         Split: {formatMoney(exp.amount / exp.beneficiaries.length)} ea.
                                                                     </span>
+                                                                    <div className="flex gap-1 mt-1">
+                                                                        <button
+                                                                            onClick={() => startEditExpense(exp)}
+                                                                            aria-label="Edit expense"
+                                                                            className="p-1 rounded-full text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors"
+                                                                        >
+                                                                            <Icon name="edit" className="text-[18px]" />
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => deleteExpense(exp)}
+                                                                            aria-label="Delete expense"
+                                                                            className="p-1 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                                                        >
+                                                                            <Icon name="delete" className="text-[18px]" />
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         ))}
@@ -2241,6 +2266,31 @@
                 T.interaction('submitExpense', description || 'Untitled');
                 const span = T.startSpan('submitExpense', 'expense');
 
+                if (editingId) {
+                    const existing = expenses.find(e => e.id === editingId);
+                    const updated = {
+                        ...existing,
+                        payer,
+                        amount: val,
+                        description: description || 'Untitled',
+                        beneficiaries: Array.from(selectedBeneficiaries),
+                        lastModified: new Date().toISOString()
+                    };
+                    try {
+                        await activeDb.expenses.put(updated);
+                        setExpenses(prev => prev.map(e => e.id === editingId ? updated : e));
+                        setEditingId(null);
+                        setAmount('');
+                        setDescription('');
+                        setViewMode('history');
+                        span.end({ id: updated.id, edited: true });
+                        T.info('expense', `✏️ Edited expense: ${formatMoney(val)} by ${payer}`, { description: updated.description });
+                    } catch (err) {
+                        span.error(err);
+                    }
+                    return;
+                }
+
                 const newExpense = {
                     id: generateId(),
                     payer,
@@ -2265,6 +2315,37 @@
                 }
             };
 
+
+            const startEditExpense = (exp) => {
+                T.interaction('editExpense', exp.id);
+                setEditingId(exp.id);
+                setPayer(exp.payer);
+                setAmount(String(exp.amount));
+                setDescription(exp.description === 'Untitled' ? '' : exp.description);
+                setSelectedBeneficiaries(new Set(exp.beneficiaries));
+                setViewMode('log');
+            };
+
+            const cancelEditExpense = () => {
+                setEditingId(null);
+                setAmount('');
+                setDescription('');
+                setSelectedBeneficiaries(new Set(participants));
+                setViewMode('history');
+            };
+
+            const deleteExpense = async (exp) => {
+                if (!window.confirm(`Delete "${exp.description}" (${formatMoney(exp.amount)})?`)) return;
+                T.interaction('deleteExpense', exp.id);
+                const updated = { ...exp, deleted: true, lastModified: new Date().toISOString() };
+                try {
+                    await activeDb.expenses.put(updated);
+                    setExpenses(prev => prev.map(e => e.id === exp.id ? updated : e));
+                    T.info('expense', `🗑️ Deleted expense: ${formatMoney(exp.amount)} by ${exp.payer}`, { description: exp.description });
+                } catch (err) {
+                    T.error('expense', 'Failed to delete expense', { error: err.message });
+                }
+            };
 
             // --- IMPORT / EXPORT LOGIC ---
 
